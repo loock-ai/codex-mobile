@@ -1337,3 +1337,266 @@ test("新会话启动期间返回列表不会被迟到响应重新拉回且任�
   await expect(page.getByPlaceholder("搜索聊天")).toBeVisible();
   await expect(delayedThread).toBeVisible();
 });
+
+test("点击会话立即进入详情，失败后可以在骨架屏中重试", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    class DelayedResumeSocket extends EventTarget {
+      static OPEN = 1;
+      static CLOSED = 3;
+      readyState = 0;
+      resumeCount = 0;
+
+      constructor() {
+        super();
+        setTimeout(() => {
+          this.readyState = DelayedResumeSocket.OPEN;
+          this.dispatchEvent(new Event("open"));
+        }, 0);
+      }
+
+      send(raw: string) {
+        const request = JSON.parse(raw);
+        if (request.id == null) return;
+        const responses: Record<string, unknown> = {
+          initialize: {},
+          "model/list": {
+            data: [
+              {
+                model: "gpt-test",
+                displayName: "GPT Test",
+                isDefault: true,
+                supportedReasoningEfforts: [],
+                serviceTiers: [],
+              },
+            ],
+          },
+          "permissionProfile/list": {
+            data: [{ id: ":workspace", allowed: true }],
+          },
+          "config/read": { config: { sandbox_mode: "workspace-write" } },
+          "thread/list": {
+            data: [
+              {
+                id: "retry-thread",
+                preview: "失败后可重试",
+                cwd: "/tmp/retry-project",
+                updatedAt: Math.floor(Date.now() / 1000),
+                status: { type: "idle" },
+              },
+            ],
+          },
+        };
+
+        if (request.method === "thread/resume") {
+          this.resumeCount += 1;
+          const attempt = this.resumeCount;
+          setTimeout(() => {
+            this.dispatchEvent(
+              new MessageEvent("message", {
+                data: JSON.stringify(
+                  attempt === 1
+                    ? {
+                        id: request.id,
+                        error: { code: -32000, message: "会话读取失败" },
+                      }
+                    : {
+                        id: request.id,
+                        result: {
+                          thread: {
+                            id: "retry-thread",
+                            preview: "失败后可重试",
+                            cwd: "/tmp/retry-project",
+                            turns: [
+                              {
+                                id: "retry-turn",
+                                status: "completed",
+                                items: [
+                                  {
+                                    id: "retry-user",
+                                    type: "userMessage",
+                                    text: "重新读取",
+                                  },
+                                  {
+                                    id: "retry-agent",
+                                    type: "agentMessage",
+                                    phase: "final_answer",
+                                    text: "重试成功",
+                                  },
+                                ],
+                              },
+                            ],
+                          },
+                        },
+                      },
+                ),
+              }),
+            );
+          }, 180);
+          return;
+        }
+
+        setTimeout(() => {
+          this.dispatchEvent(
+            new MessageEvent("message", {
+              data: JSON.stringify({
+                id: request.id,
+                result: responses[request.method] ?? {},
+              }),
+            }),
+          );
+        }, 0);
+      }
+
+      close() {
+        this.readyState = DelayedResumeSocket.CLOSED;
+        this.dispatchEvent(new CloseEvent("close"));
+      }
+    }
+    (window as any).WebSocket = DelayedResumeSocket;
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /失败后可重试/ }).click();
+
+  await expect(
+    page.getByRole("strong").filter({ hasText: "失败后可重试" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("status", { name: "正在加载会话详情" }),
+  ).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "向 Codex 提问" }))
+    .toBeDisabled();
+
+  await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
+  await page.getByRole("button", { name: "重试" }).click();
+  await expect(
+    page.getByRole("status", { name: "正在加载会话详情" }),
+  ).toBeVisible();
+  await expect(page.getByText("重试成功", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("status", { name: "正在加载会话详情" }),
+  ).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "向 Codex 提问" }))
+    .toBeEnabled();
+});
+
+test("会话加载中返回并打开其他会话后忽略旧详情响应", async ({ page }) => {
+  await page.addInitScript(() => {
+    class CancelResumeSocket extends EventTarget {
+      static OPEN = 1;
+      static CLOSED = 3;
+      readyState = 0;
+
+      constructor() {
+        super();
+        setTimeout(() => {
+          this.readyState = CancelResumeSocket.OPEN;
+          this.dispatchEvent(new Event("open"));
+        }, 0);
+      }
+
+      send(raw: string) {
+        const request = JSON.parse(raw);
+        if (request.id == null) return;
+        const responses: Record<string, unknown> = {
+          initialize: {},
+          "model/list": {
+            data: [
+              {
+                model: "gpt-test",
+                displayName: "GPT Test",
+                isDefault: true,
+                supportedReasoningEfforts: [],
+                serviceTiers: [],
+              },
+            ],
+          },
+          "permissionProfile/list": {
+            data: [{ id: ":workspace", allowed: true }],
+          },
+          "config/read": { config: { sandbox_mode: "workspace-write" } },
+          "thread/list": {
+            data: [
+              {
+                id: "cancel-thread",
+                preview: "可取消加载",
+                updatedAt: Math.floor(Date.now() / 1000),
+                status: { type: "idle" },
+              },
+              {
+                id: "next-thread",
+                preview: "新的目标会话",
+                updatedAt: Math.floor(Date.now() / 1000) - 1,
+                status: { type: "idle" },
+              },
+            ],
+          },
+        };
+        const isResume = request.method === "thread/resume";
+        const isCancelledThread =
+          isResume && request.params.threadId === "cancel-thread";
+        const result = isResume
+          ? {
+              thread: {
+                id: isCancelledThread ? "cancel-thread" : "next-thread",
+                preview: isCancelledThread ? "可取消加载" : "新的目标会话",
+                turns: [
+                  {
+                    id: isCancelledThread ? "late-turn" : "next-turn",
+                    status: "completed",
+                    items: [
+                      {
+                        id: isCancelledThread ? "late-agent" : "next-agent",
+                        type: "agentMessage",
+                        phase: "final_answer",
+                        text: isCancelledThread ? "不应重新出现" : "正确的新内容",
+                      },
+                    ],
+                  },
+                ],
+              },
+            }
+          : responses[request.method] ?? {};
+        const delay = isCancelledThread ? 240 : isResume ? 60 : 0;
+        setTimeout(() => {
+          this.dispatchEvent(
+            new MessageEvent("message", {
+              data: JSON.stringify({
+                id: request.id,
+                result,
+              }),
+            }),
+          );
+        }, delay);
+      }
+
+      close() {
+        this.readyState = CancelResumeSocket.CLOSED;
+        this.dispatchEvent(new CloseEvent("close"));
+      }
+    }
+    (window as any).WebSocket = CancelResumeSocket;
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /可取消加载/ }).click();
+  await expect(
+    page.getByRole("status", { name: "正在加载会话详情" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "返回" }).click();
+  await expect(page.getByPlaceholder("搜索聊天")).toBeVisible();
+  await expect(page.getByRole("button", { name: /可取消加载/ }))
+    .toBeEnabled();
+  await page.getByRole("button", { name: /新的目标会话/ }).click();
+  await expect(
+    page.getByRole("status", { name: "正在加载会话详情" }),
+  ).toBeVisible();
+  await expect(page.getByText("正确的新内容", { exact: true })).toBeVisible();
+  await page.waitForTimeout(320);
+  await expect(page.locator(".thread-heading strong"))
+    .toHaveText("新的目标会话");
+  await expect(page.getByText("正确的新内容", { exact: true })).toBeVisible();
+  await expect(page.getByText("不应重新出现", { exact: true })).toHaveCount(0);
+});

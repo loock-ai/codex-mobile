@@ -18,8 +18,12 @@ import { effortLabel } from "../../ui/settings";
 import { groupConversationTurns } from "../../ui/conversation";
 import { TurnCard } from "./Timeline";
 
+export type ConversationLoadState = "idle" | "loading" | "ready" | "error";
+
 export function ConversationPage({
   active,
+  loadState,
+  loadError,
   connection,
   client,
   error,
@@ -33,6 +37,7 @@ export function ConversationPage({
   selectedPermissionLabel,
   imageInputRef,
   onBack,
+  onRetry,
   onSubmit,
   onRemoveImage,
   onSelectImages,
@@ -42,6 +47,8 @@ export function ConversationPage({
   onInterrupt,
 }: {
   active: DisplayRecord;
+  loadState: ConversationLoadState;
+  loadError: string;
   connection: ConnectionState;
   client: AppServerClient | null;
   error: string;
@@ -55,6 +62,7 @@ export function ConversationPage({
   selectedPermissionLabel: string;
   imageInputRef: RefObject<HTMLInputElement | null>;
   onBack: () => void;
+  onRetry: () => void;
   onSubmit: (event: FormEvent) => void;
   onRemoveImage: (imageId: string) => void;
   onSelectImages: (files: FileList | null) => Promise<void>;
@@ -64,6 +72,7 @@ export function ConversationPage({
   onInterrupt: () => void | Promise<void>;
 }) {
   const turns = groupConversationTurns(active.turns ?? []);
+  const interactive = loadState === "ready";
   return (
     <section className="conversation">
       <header className="conversation-header">
@@ -80,8 +89,22 @@ export function ConversationPage({
         </div>
         <button className="round-button" aria-label="更多"><AppIcon name="more" /></button>
       </header>
-      <div className="timeline">
-        {turns.length ? turns.map((turn: DisplayRecord, index: number) => (
+      <div className="timeline" aria-busy={loadState === "loading"}>
+        {loadState === "loading" ? (
+          <div
+            className="conversation-skeleton"
+            role="status"
+            aria-label="正在加载会话详情"
+          >
+            {Array.from({ length: 7 }, (_, index) => <i key={index} />)}
+          </div>
+        ) : loadState === "error" ? (
+          <div className="conversation-load-error" role="alert">
+            <strong>无法加载会话</strong>
+            <p>{loadError || "请检查连接后重试。"}</p>
+            <button type="button" onClick={onRetry}>重试</button>
+          </div>
+        ) : turns.length ? turns.map((turn: DisplayRecord, index: number) => (
           <TurnCard
             key={turn.id ?? index}
             turn={turn}
@@ -121,6 +144,7 @@ export function ConversationPage({
           <button
             type="button"
             aria-label="选择模型、智能与速度"
+            disabled={!interactive}
             onClick={onOpenAgentSettings}
           >
             {selectedServiceTier ? "⚡ " : ""}
@@ -129,6 +153,7 @@ export function ConversationPage({
           <button
             type="button"
             aria-label="选择审批与权限模式"
+            disabled={!interactive}
             onClick={onOpenPermissionSettings}
           >
             {selectedPermissionLabel}
@@ -154,6 +179,7 @@ export function ConversationPage({
             className="add-button"
             aria-label="添加附件"
             disabled={
+              !interactive ||
               imageReading ||
               draftImages.length >= MAX_DRAFT_IMAGES ||
               draftImages.reduce((total, image) => total + image.size, 0) >=
@@ -163,15 +189,23 @@ export function ConversationPage({
           >
             ＋
           </button>
-          <textarea aria-label="向 Codex 提问" value={draft} onChange={(event) => onDraftChange(event.target.value)} placeholder="向 Codex 提问" rows={1} />
+          <textarea
+            aria-label="向 Codex 提问"
+            value={draft}
+            disabled={!interactive}
+            onChange={(event) => onDraftChange(event.target.value)}
+            placeholder="向 Codex 提问"
+            rows={1}
+          />
           <button
             type={busy ? "button" : "submit"}
             onClick={busy ? onInterrupt : undefined}
             className="send-button"
             aria-label={busy ? "停止" : "发送"}
             disabled={
-              !busy &&
-              (imageReading || (!draft.trim() && !draftImages.length))
+              !interactive ||
+              (!busy &&
+                (imageReading || (!draft.trim() && !draftImages.length)))
             }
           >
             <AppIcon name={busy ? "stop" : "send"} />

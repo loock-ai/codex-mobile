@@ -18,7 +18,10 @@ import {
   removePendingTurn,
 } from "./ui/conversation";
 import { resumeThreadSession } from "./app-server/thread-session";
-import { ConversationPage } from "./features/conversation/ConversationPage";
+import {
+  ConversationPage,
+  type ConversationLoadState,
+} from "./features/conversation/ConversationPage";
 import { ThreadListPage } from "./features/threads/ThreadListPage";
 import { ApprovalSheet } from "./features/approvals/ApprovalSheet";
 import {
@@ -114,12 +117,16 @@ function BackendWorkspace({
   const [activeSettingsSynchronized, setActiveSettingsSynchronized] =
     useState(true);
   const [openingThreadId, setOpeningThreadId] = useState("");
+  const [conversationLoadState, setConversationLoadState] =
+    useState<ConversationLoadState>("idle");
+  const [conversationLoadError, setConversationLoadError] = useState("");
   const [picker, setPicker] = useState<ComposerPicker>(null);
   const clientRef = useRef<AppServerClient | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const imageReadGenerationRef = useRef(new ImageReadGeneration());
   const draftContextGenerationRef = useRef(0);
   const activeRef = useRef<AnyRecord | null>(null);
+  const activeThreadTargetRef = useRef<string | null>(null);
   const openSequenceRef = useRef(0);
   const threadListLoaderRef = useRef<ReturnType<
     typeof createLatestThreadListLoader
@@ -166,7 +173,7 @@ function BackendWorkspace({
       window.cancelAnimationFrame(frame);
       if (settle != null) window.clearTimeout(settle);
     };
-  }, [active?.id, visible]);
+  }, [active?.id, conversationLoadState, visible]);
 
   useEffect(() => {
     const hasRunningThread = threads.some((thread) =>
@@ -458,6 +465,7 @@ function BackendWorkspace({
             await loadThreads(client);
             const currentThread = activeRef.current;
             if (currentThread?.id) {
+              activeThreadTargetRef.current = currentThread.id;
               const resumed = await resumeThreadSession(client, currentThread.id);
               if (
                 !disposed &&
@@ -472,6 +480,8 @@ function BackendWorkspace({
                   resumed.serviceTier,
                 );
                 setActive(resumed.thread);
+                setConversationLoadState("ready");
+                setConversationLoadError("");
                 setActiveSettingsSynchronized(resumed.settingsSynchronized);
                 setSelectedModel(resumed.model ?? "");
                 setSelectedEffort(resumedSettings.effort);
@@ -530,16 +540,22 @@ function BackendWorkspace({
     invalidateImageReads();
   }
 
-  async function openThread(thread: AnyRecord) {
-    const sequence = ++openSequenceRef.current;
-    resetDraftContext();
-    setDraft("");
-    setDraftImages([]);
-    setOpeningThreadId(thread.id);
-    setError("");
+  async function loadThreadDetail(threadId: string, sequence: number) {
+    const client = clientRef.current;
     try {
-      const session = await resumeThreadSession(clientRef.current!, thread.id);
-      if (sequence !== openSequenceRef.current) return;
+      if (!client) throw new Error("设备尚未连接，请稍后重试");
+      const session = await resumeThreadSession(client, threadId);
+      if (sequence !== openSequenceRef.current) {
+        if (activeThreadTargetRef.current !== threadId) {
+          void client
+            .request("thread/unsubscribe", { threadId })
+            .catch(() => undefined);
+        }
+        return;
+      }
+      if (!session.thread?.id) {
+        throw new Error("会话详情返回无效，请重试");
+      }
       const resumedSettings = normalizeModelSettings(
         models.find((model) => model.model === session.model),
         session.reasoningEffort,
@@ -557,14 +573,16 @@ function BackendWorkspace({
         setSelectedApprovalsReviewer(session.approvalsReviewer);
       }
       setSelectedPermission(session.activePermissionProfile?.id ?? "");
+      setConversationLoadState("ready");
+      setConversationLoadError("");
       const lastTurn = session.thread.turns?.at(-1);
       setBusy(
         ["inProgress", "in_progress", "running"].includes(lastTurn?.status),
       );
 
       if (session.thread.cwd) {
-        void clientRef.current
-          ?.request<{ data: AnyRecord[] }>("permissionProfile/list", {
+        void client
+          .request<{ data: AnyRecord[] }>("permissionProfile/list", {
             limit: 100,
             cwd: session.thread.cwd,
           })
@@ -577,11 +595,44 @@ function BackendWorkspace({
       }
     } catch (reason) {
       if (sequence === openSequenceRef.current) {
-        setError(reason instanceof Error ? reason.message : String(reason));
+        setBusy(false);
+        setConversationLoadState("error");
+        setConversationLoadError(
+          reason instanceof Error ? reason.message : String(reason),
+        );
       }
     } finally {
       if (sequence === openSequenceRef.current) setOpeningThreadId("");
     }
+  }
+
+  function openThread(thread: AnyRecord) {
+    const sequence = ++openSequenceRef.current;
+    resetDraftContext();
+    setDraft("");
+    setDraftImages([]);
+    setOpeningThreadId(thread.id);
+    setError("");
+    setBusy(false);
+    setConversationLoadError("");
+    setConversationLoadState("loading");
+    activeThreadTargetRef.current = thread.id;
+    setActive({
+      ...thread,
+      turns: thread.turns ?? [],
+    });
+    void loadThreadDetail(thread.id, sequence);
+  }
+
+  function retryThreadDetail() {
+    const threadId = activeRef.current?.id;
+    if (!threadId) return;
+    const sequence = ++openSequenceRef.current;
+    activeThreadTargetRef.current = threadId;
+    setOpeningThreadId(threadId);
+    setConversationLoadError("");
+    setConversationLoadState("loading");
+    void loadThreadDetail(threadId, sequence);
   }
 
   async function send(event: FormEvent) {
@@ -623,6 +674,7 @@ function BackendWorkspace({
           approvalsReviewer: selectedApprovalsReviewer,
         });
         thread = started.thread;
+        activeThreadTargetRef.current = thread.id;
         setThreads((current) => [
           { ...thread!, status: { type: "active" } },
           ...current.filter((entry) => entry.id !== thread!.id),
@@ -844,10 +896,14 @@ function BackendWorkspace({
   const leaveConversation = () => {
     if (!active) return;
     openSequenceRef.current += 1;
+    activeThreadTargetRef.current = null;
     resetDraftContext();
     const threadId = active.id;
+    setOpeningThreadId("");
     setDraft("");
     setDraftImages([]);
+    setConversationLoadState("idle");
+    setConversationLoadError("");
     setActive(null);
     setBusy(false);
     if (threadId && !busy) {
@@ -859,10 +915,13 @@ function BackendWorkspace({
 
   const startNewChat = () => {
     openSequenceRef.current += 1;
+    activeThreadTargetRef.current = null;
     resetDraftContext();
     setOpeningThreadId("");
     setDraft("");
     setDraftImages([]);
+    setConversationLoadState("ready");
+    setConversationLoadError("");
     setActiveSettingsSynchronized(true);
     setActive({ id: "", turns: [], preview: "新对话" });
   };
@@ -872,6 +931,8 @@ function BackendWorkspace({
       {active ? (
         <ConversationPage
           active={active}
+          loadState={conversationLoadState}
+          loadError={conversationLoadError}
           connection={connection}
           client={clientRef.current}
           error={error}
@@ -885,6 +946,7 @@ function BackendWorkspace({
           selectedPermissionLabel={selectedPermissionLabel}
           imageInputRef={imageInputRef}
           onBack={leaveConversation}
+          onRetry={retryThreadDetail}
           onSubmit={send}
           onRemoveImage={(imageId) =>
             setDraftImages((current) =>
