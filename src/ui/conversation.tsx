@@ -550,6 +550,41 @@ export function groupTurnItems(turn: ConversationRecord) {
   };
 }
 
+function isRunningTurnStatus(status: unknown) {
+  return ["inProgress", "in_progress", "running"].includes(String(status));
+}
+
+export function groupConversationTurns(
+  turns: ConversationRecord[],
+): ConversationRecord[] {
+  const groups: ConversationRecord[] = [];
+  for (const turn of turns) {
+    const items = Array.isArray(turn.items) ? turn.items : [];
+    const startsLogicalTurn = items.some(
+      (item: ConversationRecord) => item.type === "userMessage",
+    );
+    const previous = groups.at(-1);
+    if (startsLogicalTurn || !previous) {
+      groups.push({ ...turn, items: [...items] });
+      continue;
+    }
+    const liveDiff = [previous.liveDiff, turn.liveDiff]
+      .filter((value) => typeof value === "string" && value)
+      .join("\n");
+    groups[groups.length - 1] = {
+      ...previous,
+      status:
+        isRunningTurnStatus(previous.status) ||
+        isRunningTurnStatus(turn.status)
+          ? "inProgress"
+          : (turn.status ?? previous.status),
+      items: [...(previous.items ?? []), ...items],
+      ...(liveDiff ? { liveDiff } : {}),
+    };
+  }
+  return groups;
+}
+
 export function MarkdownMessage({
   text,
   renderImage,

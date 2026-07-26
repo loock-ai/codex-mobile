@@ -1,4 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { TurnCard } from "../../src/features/conversation/Timeline";
 import {
@@ -8,6 +13,7 @@ import {
   applyTurnItem,
   applyTurnStarted,
   MarkdownMessage,
+  groupConversationTurns,
   groupTimelineEntries,
   groupTurnItems,
   imageSourcesForItem,
@@ -24,6 +30,197 @@ import {
 } from "../../src/ui/conversation";
 
 describe("移动端对话格式", () => {
+  it("按用户消息边界把连续 assistant-only turns 合并为逻辑回合", () => {
+    const groups = groupConversationTurns([
+      {
+        id: "turn-user-1",
+        status: "completed",
+        liveDiff: "diff-1",
+        items: [
+          { id: "u1", type: "userMessage", text: "第一个问题" },
+          { id: "a1", type: "agentMessage", text: "先检查" },
+        ],
+      },
+      {
+        id: "turn-process",
+        status: "completed",
+        liveDiff: "diff-2",
+        items: [{ id: "r1", type: "reasoning", text: "检查过程" }],
+      },
+      {
+        id: "turn-final",
+        status: "completed",
+        items: [
+          {
+            id: "a2",
+            type: "agentMessage",
+            phase: "final_answer",
+            text: "第一个最终回复",
+          },
+        ],
+      },
+      {
+        id: "turn-user-2",
+        status: "completed",
+        items: [
+          { id: "u2", type: "userMessage", text: "第二个问题" },
+          {
+            id: "a3",
+            type: "agentMessage",
+            phase: "final_answer",
+            text: "第二个最终回复",
+          },
+        ],
+      },
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups.map((group) => group.id)).toEqual([
+      "turn-user-1",
+      "turn-user-2",
+    ]);
+    expect(groups[0].items.map((item: any) => item.id)).toEqual([
+      "u1",
+      "a1",
+      "r1",
+      "a2",
+    ]);
+    expect(groups[0].liveDiff).toBe("diff-1\ndiff-2");
+  });
+
+  it("逻辑回合完成后只生成一个统一过程折叠区", () => {
+    const [group] = groupConversationTurns([
+      {
+        id: "turn-user",
+        status: "completed",
+        items: [
+          { id: "u1", type: "userMessage", text: "检查项目" },
+          { id: "a1", type: "agentMessage", text: "开始检查" },
+        ],
+      },
+      {
+        id: "turn-process",
+        status: "completed",
+        items: [
+          { id: "r1", type: "reasoning", text: "分析过程" },
+          {
+            id: "c1",
+            type: "commandExecution",
+            status: "completed",
+            command: "npm test",
+          },
+        ],
+      },
+      {
+        id: "turn-final",
+        status: "completed",
+        items: [
+          {
+            id: "a2",
+            type: "agentMessage",
+            phase: "final_answer",
+            text: "检查完成",
+          },
+        ],
+      },
+    ]);
+
+    const { container } = render(
+      <TurnCard turn={group} client={null} />,
+    );
+    const view = within(container);
+
+    const toggle = view.getByRole("button", {
+      name: "之前的 3 条消息",
+    });
+    expect(
+      view.getAllByRole("button", { name: /之前的 \d+ 条消息/ }),
+    ).toHaveLength(1);
+    expect(view.queryByText("开始检查")).toBeNull();
+    expect(view.queryByText("分析过程")).toBeNull();
+    expect(view.queryByText("检查完成")).not.toBeNull();
+
+    fireEvent.click(toggle);
+    expect(view.queryByText("开始检查")).not.toBeNull();
+    expect(view.queryByText("分析过程")).not.toBeNull();
+  });
+
+  it("逻辑回合仍在执行时完整展示跨 turn 的实时过程", () => {
+    const runningTurns = [
+      {
+        id: "turn-user",
+        status: "completed",
+        items: [
+          { id: "u1", type: "userMessage", text: "运行测试" },
+          { id: "a1", type: "agentMessage", text: "准备执行" },
+        ],
+      },
+      {
+        id: "turn-running",
+        status: "inProgress",
+        items: [
+          { id: "r1", type: "reasoning", text: "测试进行中" },
+          {
+            id: "c1",
+            type: "commandExecution",
+            status: "inProgress",
+            command: "npm test",
+          },
+        ],
+      },
+    ];
+    const [group] = groupConversationTurns(runningTurns);
+
+    const { container, rerender } = render(
+      <TurnCard turn={group} client={null} />,
+    );
+    const view = within(container);
+
+    expect(
+      view.queryByRole("button", { name: /之前的 \d+ 条消息/ }),
+    ).toBeNull();
+    expect(view.queryByText("准备执行")).not.toBeNull();
+    expect(view.queryByText("测试进行中")).not.toBeNull();
+    expect(
+      view.queryByRole("button", { name: "正在运行 npm test" }),
+    ).not.toBeNull();
+
+    const completedTurns = [
+      runningTurns[0],
+      {
+        ...runningTurns[1],
+        status: "completed",
+        items: runningTurns[1].items.map((item) => ({
+          ...item,
+          status:
+            item.type === "commandExecution" ? "completed" : item.status,
+        })),
+      },
+      {
+        id: "turn-final",
+        status: "completed",
+        items: [
+          {
+            id: "a2",
+            type: "agentMessage",
+            phase: "final_answer",
+            text: "测试完成",
+          },
+        ],
+      },
+    ];
+    const [completedGroup] = groupConversationTurns(completedTurns);
+    expect(completedGroup.id).toBe(group.id);
+    rerender(<TurnCard turn={completedGroup} client={null} />);
+
+    expect(
+      view.queryByRole("button", { name: "之前的 3 条消息" }),
+    ).not.toBeNull();
+    expect(view.queryByText("准备执行")).toBeNull();
+    expect(view.queryByText("测试进行中")).toBeNull();
+    expect(view.queryByText("测试完成")).not.toBeNull();
+  });
+
   it("没有用户消息的回合不显示伪用户气泡", () => {
     const { container, rerender } = render(
       <TurnCard

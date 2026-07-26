@@ -15,6 +15,7 @@ import {
   type DisplayRecord,
 } from "../../ui/app-display";
 import { effortLabel } from "../../ui/settings";
+import { groupConversationTurns } from "../../ui/conversation";
 import { TurnCard } from "./Timeline";
 
 export function ConversationPage({
@@ -62,7 +63,7 @@ export function ConversationPage({
   onDraftChange: (value: string) => void;
   onInterrupt: () => void | Promise<void>;
 }) {
-  const turns = active.turns ?? [];
+  const turns = groupConversationTurns(active.turns ?? []);
   return (
     <section className="conversation">
       <header className="conversation-header">

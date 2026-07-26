@@ -1059,6 +1059,164 @@ test("移动端可连接真实 app-server 并进入新对话", async ({ page }) 
   });
 });
 
+test("多个协议 turn 在同一用户任务中只显示一个统一折叠区", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    class SplitTurnSocket extends EventTarget {
+      static OPEN = 1;
+      static CLOSED = 3;
+      readyState = 0;
+
+      constructor() {
+        super();
+        setTimeout(() => {
+          this.readyState = SplitTurnSocket.OPEN;
+          this.dispatchEvent(new Event("open"));
+        }, 0);
+      }
+
+      send(raw: string) {
+        const request = JSON.parse(raw);
+        if (request.id == null) return;
+        const responses: Record<string, unknown> = {
+          initialize: {},
+          "model/list": {
+            data: [
+              {
+                model: "gpt-test",
+                displayName: "GPT Test",
+                isDefault: true,
+                supportedReasoningEfforts: [],
+                serviceTiers: [],
+              },
+            ],
+          },
+          "permissionProfile/list": {
+            data: [{ id: ":workspace", allowed: true }],
+          },
+          "config/read": { config: { sandbox_mode: "workspace-write" } },
+          "thread/list": {
+            data: [
+              {
+                id: "split-thread",
+                preview: "拆分协议回合",
+                updatedAt: Math.floor(Date.now() / 1000),
+                status: { type: "idle" },
+              },
+            ],
+          },
+          "thread/resume": {
+            thread: {
+              id: "split-thread",
+              preview: "拆分协议回合",
+              turns: [
+                {
+                  id: "turn-user",
+                  status: "completed",
+                  items: [
+                    {
+                      id: "u1",
+                      type: "userMessage",
+                      text: "检查并修复",
+                    },
+                    {
+                      id: "a1",
+                      type: "agentMessage",
+                      text: "开始检查",
+                    },
+                  ],
+                },
+                {
+                  id: "turn-process",
+                  status: "completed",
+                  items: [
+                    {
+                      id: "r1",
+                      type: "reasoning",
+                      text: "分析问题",
+                    },
+                    {
+                      id: "c1",
+                      type: "commandExecution",
+                      status: "completed",
+                      command: "npm test",
+                    },
+                  ],
+                },
+                {
+                  id: "turn-final",
+                  status: "completed",
+                  items: [
+                    {
+                      id: "a2",
+                      type: "agentMessage",
+                      phase: "final_answer",
+                      text: "修复完成",
+                    },
+                  ],
+                },
+                {
+                  id: "turn-next-user",
+                  status: "completed",
+                  items: [
+                    {
+                      id: "u2",
+                      type: "userMessage",
+                      text: "继续确认",
+                    },
+                    {
+                      id: "a3",
+                      type: "agentMessage",
+                      phase: "final_answer",
+                      text: "确认完成",
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        };
+        setTimeout(() => {
+          this.dispatchEvent(
+            new MessageEvent("message", {
+              data: JSON.stringify({
+                id: request.id,
+                result: responses[request.method] ?? {},
+              }),
+            }),
+          );
+        }, 0);
+      }
+
+      close() {
+        this.readyState = SplitTurnSocket.CLOSED;
+        this.dispatchEvent(new CloseEvent("close"));
+      }
+    }
+    (window as any).WebSocket = SplitTurnSocket;
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /拆分协议回合/ }).click();
+
+  const previousMessages = page.getByRole("button", {
+    name: "之前的 3 条消息",
+  });
+  await expect(previousMessages).toHaveCount(1);
+  await expect(page.getByRole("button", { name: /之前的 \d+ 条消息/ }))
+    .toHaveCount(1);
+  await expect(page.getByText("修复完成", { exact: true })).toBeVisible();
+  await expect(page.getByText("确认完成", { exact: true })).toBeVisible();
+  await expect(page.getByText("开始检查", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("分析问题", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Codex 回合", { exact: true })).toHaveCount(0);
+
+  await previousMessages.click();
+  await expect(page.getByText("开始检查", { exact: true })).toBeVisible();
+  await expect(page.getByText("分析问题", { exact: true })).toBeVisible();
+});
+
 test("新会话启动期间返回列表不会被迟到响应重新拉回且任务保持进行中", async ({
   page,
 }) => {
