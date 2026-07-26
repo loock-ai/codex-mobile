@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx server/index.ts",
+    "dev": "zsh -lc 'source \"${CODEX_MOBILE_ENV_FILE:-$HOME/Library/Application Support/CodexMobileWeb/gateway.env}\" && exec npm exec -- concurrently --kill-others --success first --names gateway,vite \"npm:dev:gateway\" \"npm:dev:web\"'",
+    "dev:gateway": "NODE_ENV=development CODEX_MOBILE_SERVE_STATIC=false tsx watch server/index.ts",
+    "dev:web": "NODE_ENV=development vite --host 0.0.0.0 --port 5173 --strictPort",
     "build": "tsc -b && vite build",
     "start": "NODE_ENV=production tsx server/index.ts",
     "test": "vitest run",
@@ -29,6 +31,7 @@
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@types/ws": "^8.18.1",
+    "concurrently": "^10.0.4",
     "jsdom": "^27.2.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",

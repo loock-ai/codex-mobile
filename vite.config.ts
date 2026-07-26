@@ -1,8 +1,10 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
+import { viteDevServerConfig } from "./server/dev-mode.js";
 
 export default defineConfig({
   plugins: [react()],
+  server: viteDevServerConfig,
   build: {
     outDir: "dist",
   },
