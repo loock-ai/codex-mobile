@@ -46,6 +46,44 @@ CODEX_MOBILE_TOKEN='<随机口令>' npm start
 手机访问 `http://<Mac局域网IP>:4173/?token=<随机口令>`。口令仅作为轻量局域网
 保护；跨不可信网络应在前面增加 HTTPS 和正式认证。
 
+### 多设备模式
+
+前端会在浏览器 `localStorage` 中保存最多 8 个设备网关，并同时连接所有已启用
+设备。每台 Mac 都运行自己的透明网关和仅监听回环地址的 app-server；设备之间
+不互相代理。
+
+Mac mini 同时托管前端和本机网关：
+
+```bash
+CODEX_MOBILE_HOST_ID=mac-mini \
+CODEX_MOBILE_HOST_NAME='Mac mini' \
+CODEX_MOBILE_ALLOWED_ORIGINS='http://192.168.100.8:4173,http://mac-mini.local:4173' \
+CODEX_MOBILE_SERVE_STATIC=true \
+CODEX_MOBILE_TOKEN='<Mac-mini-独立口令>' \
+npm start
+```
+
+其他 Mac 只运行本机网关：
+
+```bash
+CODEX_MOBILE_HOST_ID=macbook \
+CODEX_MOBILE_HOST_NAME='MacBook Pro' \
+CODEX_MOBILE_ALLOWED_ORIGINS='http://192.168.100.8:4173,http://mac-mini.local:4173' \
+CODEX_MOBILE_SERVE_STATIC=false \
+CODEX_MOBILE_TOKEN='<本机独立口令>' \
+npm start
+```
+
+手机打开 Mac mini 前端后，在 Remote 页点击右上角菜单或设备标签后的 `＋`：
+
+1. 输入设备名称、`http://<设备局域网地址>:4173` 和该设备的独立口令。
+2. 点击“测试并保存”；前端会检查 `/api/host` 并临时完成一次 WebSocket
+   `initialize`。
+3. 点击顶部设备标签切换当前设备。未选中的设备仍保持连接，并显示进行中任务和
+   待审批数量。
+
+原始 app-server 不应监听局域网地址；只有透明网关监听 `0.0.0.0:4173`。
+
 ## 验证
 
 ```bash

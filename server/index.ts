@@ -1,10 +1,25 @@
 import { resolve } from "node:path";
+import { hostname as readHostname } from "node:os";
 import { createGateway, type Gateway } from "./gateway.js";
-import { resolveRuntimeConfig, startManagedAppServer } from "./app-server-manager.js";
+import {
+  assertGatewaySecurity,
+  resolveGatewayRuntimeConfig,
+  resolveRuntimeConfig,
+  startManagedAppServer,
+} from "./app-server-manager.js";
 
 const runtime = resolveRuntimeConfig();
-const host = process.env.HOST ?? "0.0.0.0";
+const gatewayRuntime = resolveGatewayRuntimeConfig(
+  process.env,
+  readHostname(),
+);
+const host = process.env.HOST ?? "127.0.0.1";
 const port = Number(process.env.PORT ?? "4173");
+assertGatewaySecurity(
+  host,
+  process.env.CODEX_MOBILE_TOKEN,
+  gatewayRuntime.allowedOrigins,
+);
 const managed =
   runtime.mode === "managed" ? await startManagedAppServer(runtime.upstreamPort) : null;
 let gateway: Gateway;
@@ -14,8 +29,30 @@ try {
     port,
     mode: runtime.mode,
     upstreamUrl: runtime.upstreamUrl,
-    staticDir: resolve(process.cwd(), "dist"),
+    staticDir: gatewayRuntime.serveStatic
+      ? resolve(process.cwd(), "dist")
+      : null,
     accessToken: process.env.CODEX_MOBILE_TOKEN,
+    hostId: gatewayRuntime.hostId,
+    displayName: gatewayRuntime.displayName,
+    hostname: gatewayRuntime.hostname,
+    gatewayVersion: process.env.npm_package_version ?? "0.2.0",
+    allowedOrigins: gatewayRuntime.allowedOrigins,
+    appServerReady: async () => {
+      try {
+        const ready = new URL(runtime.upstreamUrl);
+        ready.protocol = ready.protocol === "wss:" ? "https:" : "http:";
+        ready.pathname = "/readyz";
+        ready.search = "";
+        ready.hash = "";
+        const response = await fetch(ready, {
+          signal: AbortSignal.timeout(2_000),
+        });
+        return response.ok;
+      } catch {
+        return false;
+      }
+    },
   });
 } catch (error) {
   await managed?.close();

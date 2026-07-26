@@ -10,6 +10,12 @@ export interface GatewayOptions {
   upstreamUrl: string;
   staticDir: string | null;
   accessToken?: string;
+  hostId?: string;
+  displayName?: string;
+  hostname?: string;
+  gatewayVersion?: string;
+  appServerReady?: () => Promise<boolean>;
+  allowedOrigins?: string[];
 }
 
 export interface Gateway {
@@ -40,9 +46,39 @@ function authorized(url: URL, expected?: string, cookie?: string) {
   );
 }
 
+function originAllowed(origin: string | undefined, allowed?: string[]) {
+  return !origin || !allowed?.length || allowed.includes(origin);
+}
+
+function applyCors(
+  response: import("node:http").ServerResponse,
+  origin: string | undefined,
+  allowed?: string[],
+) {
+  if (!origin || !allowed?.includes(origin)) return;
+  response.setHeader("access-control-allow-origin", origin);
+  response.setHeader("access-control-allow-methods", "GET, OPTIONS");
+  response.setHeader("access-control-allow-headers", "content-type");
+  response.setHeader("vary", "Origin");
+}
+
 export async function createGateway(options: GatewayOptions): Promise<Gateway> {
   const server: Server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://gateway.local");
+    const origin = request.headers.origin;
+    const controlRequest =
+      url.pathname === "/api/status" || url.pathname === "/api/host";
+    if (
+      controlRequest &&
+      !originAllowed(origin, options.allowedOrigins)
+    ) {
+      response.statusCode = 403;
+      response.end("Forbidden");
+      return;
+    }
+    if (controlRequest) {
+      applyCors(response, origin, options.allowedOrigins);
+    }
     if (!authorized(url, options.accessToken, request.headers.cookie)) {
       response.statusCode = 401;
       response.end("Unauthorized");
@@ -53,6 +89,33 @@ export async function createGateway(options: GatewayOptions): Promise<Gateway> {
         "set-cookie",
         `codex_mobile_token=${encodeURIComponent(options.accessToken)}; Path=/; HttpOnly; SameSite=Strict`,
       );
+    }
+    if (controlRequest && request.method === "OPTIONS") {
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
+    if (url.pathname === "/api/host") {
+      let appServerReady = false;
+      try {
+        appServerReady = options.appServerReady
+          ? await options.appServerReady()
+          : true;
+      } catch {
+        appServerReady = false;
+      }
+      response.setHeader("content-type", "application/json; charset=utf-8");
+      response.end(
+        JSON.stringify({
+          hostId: options.hostId ?? "local",
+          displayName:
+            options.displayName ?? options.hostname ?? options.hostId ?? "Codex",
+          hostname: options.hostname ?? "localhost",
+          gatewayVersion: options.gatewayVersion ?? "0.1.0",
+          appServerReady,
+        }),
+      );
+      return;
     }
     if (url.pathname === "/api/status") {
       response.setHeader("content-type", "application/json; charset=utf-8");
@@ -89,6 +152,11 @@ export async function createGateway(options: GatewayOptions): Promise<Gateway> {
     const url = new URL(request.url ?? "/", "http://gateway.local");
     if (url.pathname !== "/ws") {
       socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    if (!originAllowed(request.headers.origin, options.allowedOrigins)) {
+      socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       socket.destroy();
       return;
     }

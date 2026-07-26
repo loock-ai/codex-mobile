@@ -789,6 +789,254 @@ test("移动端选择器、线程恢复、Markdown、折叠与吸顶", async ({ 
   expect(widths.body).toBeLessThanOrEqual(widths.viewport);
 });
 
+test("多设备同时连接、切换、缓存并路由后台审批", async ({ page }) => {
+  await page.addInitScript(() => {
+    if (!localStorage.getItem("codex-mobile.backend-registry.v1")) {
+      localStorage.setItem(
+        "codex-mobile.backend-registry.v1",
+        JSON.stringify({
+        version: 1,
+        selectedBackendId: "mini",
+        backends: [
+          {
+            id: "mini",
+            name: "Mac mini",
+            baseUrl: "http://mini.test:4173",
+            token: "mini-token",
+            enabled: true,
+            order: 0,
+          },
+          {
+            id: "macbook",
+            name: "MacBook",
+            baseUrl: "http://macbook.test:4173",
+            token: "macbook-token",
+            enabled: true,
+            order: 1,
+          },
+        ],
+        }),
+      );
+    }
+    (window as any).__backendMessages = [];
+    (window as any).__backendSockets = [];
+    (window as any).__backendSocketInstances = [];
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url,
+      );
+      if (url.hostname.endsWith(".test") && url.pathname === "/api/host") {
+        const hostId = url.hostname.replace(".test", "");
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              hostId,
+              displayName: hostId,
+              hostname: url.hostname,
+              gatewayVersion: "0.2.0",
+              appServerReady: true,
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          ),
+        );
+      }
+      return nativeFetch(input, init);
+    }) as typeof window.fetch;
+    class MultiBackendSocket extends EventTarget {
+      static OPEN = 1;
+      static CLOSED = 3;
+      readyState = 0;
+      host: string;
+
+      constructor(rawUrl: string) {
+        super();
+        this.host = new URL(rawUrl).hostname;
+        (window as any).__backendSockets.push(this.host);
+        (window as any).__backendSocketInstances.push(this);
+        setTimeout(() => {
+          this.readyState = MultiBackendSocket.OPEN;
+          this.dispatchEvent(new Event("open"));
+        }, 0);
+      }
+
+      send(raw: string) {
+        const request = JSON.parse(raw);
+        (window as any).__backendMessages.push({
+          host: this.host,
+          message: request,
+        });
+        if (request.id == null) return;
+        const prefix = this.host === "mini.test" ? "Mini" : "MacBook";
+        const responses: Record<string, unknown> = {
+          initialize: {
+            userAgent: `${prefix}-mock`,
+            codexHome: "/tmp/codex",
+            platformFamily: "unix",
+            platformOs: "macos",
+          },
+          "model/list": {
+            data: [
+              {
+                id: "default",
+                model: "gpt-test",
+                displayName: "GPT Test",
+                isDefault: true,
+                supportedReasoningEfforts: [],
+                serviceTiers: [],
+              },
+            ],
+          },
+          "permissionProfile/list": {
+            data: [{ id: ":workspace", allowed: true }],
+          },
+          "config/read": {
+            config: {
+              model: "gpt-test",
+              sandbox_mode: "workspace-write",
+            },
+          },
+          "thread/list": {
+            data: [
+              {
+                id: `${prefix.toLowerCase()}-thread`,
+                preview: `${prefix} 任务`,
+                updatedAt: Math.floor(Date.now() / 1000),
+                status:
+                  this.host === "mini.test"
+                    ? { type: "active", activeFlags: ["waitingOnApproval"] }
+                    : { type: "idle" },
+              },
+            ],
+          },
+        };
+        setTimeout(() => {
+          this.dispatchEvent(
+            new MessageEvent("message", {
+              data: JSON.stringify({
+                id: request.id,
+                result: responses[request.method] ?? {},
+              }),
+            }),
+          );
+        }, 0);
+        if (
+          this.host === "macbook.test" &&
+          request.method === "thread/list"
+        ) {
+          setTimeout(() => {
+            this.dispatchEvent(
+              new MessageEvent("message", {
+                data: JSON.stringify({
+                  id: "approval-1",
+                  method: "item/commandExecution/requestApproval",
+                  params: { command: "npm test" },
+                }),
+              }),
+            );
+          }, 80);
+        }
+      }
+
+      close() {
+        this.readyState = MultiBackendSocket.CLOSED;
+        this.dispatchEvent(new CloseEvent("close"));
+      }
+    }
+    (window as any).WebSocket = MultiBackendSocket;
+  });
+
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: /Mac mini.*进行中/ }))
+    .toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => new Set((window as any).__backendSockets).size,
+      ),
+    )
+    .toBe(2);
+  await expect(page.getByRole("button", { name: /Mini 任务/ })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "MacBook 有 1 个待审批" }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "MacBook 有 1 个待审批" }).click();
+  await expect(page.getByRole("button", { name: /MacBook.*1 个待审批/ }))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: /MacBook 任务/ })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "允许运行此操作？" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "允许", exact: true }).click();
+
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const responses = (window as any).__backendMessages.filter(
+          (entry: any) => entry.message.id === "approval-1",
+        );
+        return responses.map((entry: any) => entry.host);
+      }),
+    )
+    .toEqual(["macbook.test"]);
+
+  await page.getByRole("button", { name: "管理设备", exact: true }).click();
+  await page.getByRole("button", { name: "添加设备" }).click();
+  await page.getByLabel("设备名称").fill("Studio Mac");
+  await page.getByLabel("网关地址").fill("http://studio.test:4173");
+  await page.getByLabel("访问口令").fill("studio-token");
+  await page.getByRole("button", { name: "测试并保存" }).click();
+  await expect(page.getByRole("heading", { name: "管理设备" })).toBeVisible();
+  await page.getByRole("button", { name: "关闭" }).click();
+  await expect(page.getByRole("button", { name: /Studio Mac.*已连接/ }))
+    .toBeVisible();
+
+  await page.evaluate(() => {
+    const miniSocket = (window as any).__backendSocketInstances.find(
+      (socket: any) =>
+        socket.host === "mini.test" &&
+        socket.readyState === (window as any).WebSocket.OPEN,
+    );
+    miniSocket.close();
+  });
+  await expect(page.getByRole("button", { name: /MacBook 任务/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /MacBook.*已连接/ }))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as any).__backendSockets.filter(
+            (host: string) => host === "mini.test",
+          ).length,
+      ),
+    )
+    .toBeGreaterThan(1);
+  await page.getByRole("button", { name: /Mac mini.*已连接/ }).click();
+  await expect(page.getByRole("button", { name: /Mini 任务/ })).toBeVisible();
+  await page.getByRole("button", { name: /MacBook.*已连接/ }).click();
+
+  await page.reload();
+  await expect(page.getByRole("button", { name: /MacBook 任务/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /MacBook.*已连接/ }))
+    .toHaveAttribute("aria-pressed", "true");
+  const widths = await page.evaluate(() => ({
+    viewport: window.innerWidth,
+    document: document.documentElement.scrollWidth,
+    body: document.body.scrollWidth,
+  }));
+  expect(widths.document).toBeLessThanOrEqual(widths.viewport);
+  expect(widths.body).toBeLessThanOrEqual(widths.viewport);
+});
+
 test("移动端可连接真实 app-server 并进入新对话", async ({ page }) => {
   test.setTimeout(130_000);
   await page.goto("/");
@@ -809,4 +1057,125 @@ test("移动端可连接真实 app-server 并进入新对话", async ({ page }) 
   await expect(page.getByText("E2E_OK", { exact: true })).toBeVisible({
     timeout: 120_000,
   });
+});
+
+test("新会话启动期间返回列表不会被迟到响应重新拉回且任务保持进行中", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const now = Math.floor(Date.now() / 1000);
+    class DelayedStartSocket extends EventTarget {
+      static OPEN = 1;
+      static CLOSED = 3;
+      readyState = 0;
+
+      constructor() {
+        super();
+        setTimeout(() => {
+          this.readyState = DelayedStartSocket.OPEN;
+          this.dispatchEvent(new Event("open"));
+        }, 0);
+      }
+
+      send(raw: string) {
+        const request = JSON.parse(raw);
+        if (request.id == null) return;
+        const responses: Record<string, unknown> = {
+          initialize: {},
+          "model/list": {
+            data: [
+              {
+                model: "gpt-test",
+                displayName: "GPT Test",
+                isDefault: true,
+                supportedReasoningEfforts: [],
+                serviceTiers: [],
+              },
+            ],
+          },
+          "permissionProfile/list": {
+            data: [{ id: ":workspace", allowed: true }],
+          },
+          "config/read": { config: { sandbox_mode: "workspace-write" } },
+          "thread/list": {
+            data: [
+              {
+                id: "existing",
+                preview: "已有会话",
+                updatedAt: now,
+                status: { type: "idle" },
+              },
+            ],
+          },
+          "thread/start": {
+            thread: {
+              id: "delayed-thread",
+              preview: "延迟启动的任务",
+              updatedAt: now + 1,
+              turns: [],
+            },
+          },
+          "turn/start": {
+            turn: {
+              id: "delayed-turn",
+              status: "inProgress",
+              items: [],
+            },
+          },
+        };
+        const delay = request.method === "thread/start" ? 180 : 0;
+        setTimeout(() => {
+          this.dispatchEvent(
+            new MessageEvent("message", {
+              data: JSON.stringify({
+                id: request.id,
+                result: responses[request.method] ?? {},
+              }),
+            }),
+          );
+        }, delay);
+        if (request.method === "turn/start") {
+          setTimeout(() => {
+            this.dispatchEvent(
+              new MessageEvent("message", {
+                data: JSON.stringify({
+                  method: "turn/started",
+                  params: {
+                    threadId: "delayed-thread",
+                    turn: {
+                      id: "delayed-turn",
+                      status: "inProgress",
+                      items: [],
+                    },
+                  },
+                }),
+              }),
+            );
+          }, 20);
+        }
+      }
+
+      close() {
+        this.readyState = DelayedStartSocket.CLOSED;
+        this.dispatchEvent(new CloseEvent("close"));
+      }
+    }
+    (window as any).WebSocket = DelayedStartSocket;
+  });
+
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "已有会话" })).toBeVisible();
+  await page.getByRole("button", { name: "聊天", exact: true }).click();
+  await page.getByRole("textbox", { name: "向 Codex 提问" }).fill("开始任务");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await page.getByRole("button", { name: "返回" }).click();
+
+  await expect(page.getByPlaceholder("搜索聊天")).toBeVisible();
+  const delayedThread = page.getByRole("button", {
+    name: /延迟启动的任务.*进行中/,
+  });
+  await expect(delayedThread).toBeVisible();
+  await page.waitForTimeout(250);
+  await expect(page.getByPlaceholder("搜索聊天")).toBeVisible();
+  await expect(delayedThread).toBeVisible();
 });

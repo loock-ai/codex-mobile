@@ -1,5 +1,6 @@
 import {
   FormEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -13,6 +14,7 @@ import {
   applyTurnDiff,
   applyTurnItem,
   applyTurnStarted,
+  isThreadRunning,
   removePendingTurn,
 } from "./ui/conversation";
 import { resumeThreadSession } from "./app-server/thread-session";
@@ -47,16 +49,42 @@ import {
   type ApprovalsReviewer,
   type PermissionModeId,
 } from "./ui/settings";
+import {
+  assignBackendHostId,
+  loadBackendRegistry,
+  saveBackendRegistry,
+} from "./backends/registry";
+import { BackendConnectionManager } from "./backends/connection-manager";
+import { fetchBackendHostInfo } from "./backends/probe";
+import type {
+  BackendConfig,
+  BackendRegistry,
+  BackendRuntimeSummary,
+} from "./backends/types";
+import { BackendManagerSheet } from "./features/backends/BackendManagerSheet";
+import { BackendAttentionBanner } from "./features/backends/BackendAttentionBanner";
 
 type AnyRecord = Record<string, any>;
 
-function wsUrl() {
-  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  const token = new URLSearchParams(location.search).get("token");
-  return `${protocol}//${location.host}/ws${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+interface BackendWorkspaceProps {
+  backend: BackendConfig;
+  visible: boolean;
+  backends: BackendConfig[];
+  summaries: Record<string, BackendRuntimeSummary>;
+  onSelectBackend: (backendId: string) => void;
+  onManageBackends: () => void;
+  onSummaryChange: (summary: BackendRuntimeSummary) => void;
 }
 
-export function App() {
+function BackendWorkspace({
+  backend,
+  visible,
+  backends,
+  summaries,
+  onSelectBackend,
+  onManageBackends,
+  onSummaryChange,
+}: BackendWorkspaceProps) {
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [threads, setThreads] = useState<AnyRecord[]>([]);
   const [threadListState, setThreadListState] =
@@ -91,7 +119,6 @@ export function App() {
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const imageReadGenerationRef = useRef(new ImageReadGeneration());
   const draftContextGenerationRef = useRef(0);
-  const socketRef = useRef<WebSocket | null>(null);
   const activeRef = useRef<AnyRecord | null>(null);
   const openSequenceRef = useRef(0);
   const threadListLoaderRef = useRef<ReturnType<
@@ -121,6 +148,7 @@ export function App() {
   }
 
   useEffect(() => {
+    if (!visible) return;
     let cancelled = false;
     const scrollToPageTarget = () => {
       if (cancelled) return;
@@ -138,7 +166,28 @@ export function App() {
       window.cancelAnimationFrame(frame);
       if (settle != null) window.clearTimeout(settle);
     };
-  }, [active?.id]);
+  }, [active?.id, visible]);
+
+  useEffect(() => {
+    const hasRunningThread = threads.some((thread) =>
+      isThreadRunning(thread.status),
+    );
+    onSummaryChange({
+      backendId: backend.id,
+      connection,
+      busy: busy || hasRunningThread,
+      approvalCount: requests.length,
+      error,
+    });
+  }, [
+    backend.id,
+    busy,
+    connection,
+    error,
+    onSummaryChange,
+    requests.length,
+    threads,
+  ]);
 
   useEffect(() => {
     const refresh = window.setInterval(() => {
@@ -150,20 +199,52 @@ export function App() {
 
   useEffect(() => {
     let disposed = false;
-    let retry: number | undefined;
-    let retryAttempt = 0;
-    const connect = () => {
-      if (disposed) return;
-      setConnection("connecting");
-      const socket = new WebSocket(wsUrl());
-      socketRef.current = socket;
-      socket.addEventListener("open", async () => {
-        retryAttempt = 0;
-        const client = new AppServerClient(socket);
-        clientRef.current = client;
-        client.onNotification((message) => {
+    let manager: BackendConnectionManager;
+    manager = new BackendConnectionManager({
+      onConnection: (_backendId, status, connectionError) => {
+        if (disposed) return;
+        setConnection(status);
+        if (status === "online") setError("");
+        if (connectionError) setError(connectionError);
+        if (status === "offline") {
+          clientRef.current = null;
+          setBusy(false);
+          setRequests([]);
+          void fetchBackendHostInfo(backend).catch((reason) => {
+            const message =
+              reason instanceof Error ? reason.message : String(reason);
+            if (
+              message.includes("访问口令") ||
+              message.includes("未被设备允许")
+            ) {
+              manager.sync([]);
+              setError(message);
+            }
+          });
+        }
+      },
+      onNotification: (_backendId, message, source) => {
+          const client = source as AppServerClient;
           const params = (message.params ?? {}) as AnyRecord;
           if (message.method === "turn/started" && params.turn) {
+            if (params.threadId) {
+              setThreads((current) => {
+                const index = current.findIndex(
+                  (thread) => thread.id === params.threadId,
+                );
+                if (index >= 0) {
+                  return current.map((thread, threadIndex) =>
+                    threadIndex === index
+                      ? { ...thread, status: { type: "active" } }
+                      : thread,
+                  );
+                }
+                const opened = activeRef.current;
+                return opened?.id === params.threadId
+                  ? [{ ...opened, status: { type: "active" } }, ...current]
+                  : current;
+              });
+            }
             setActive((current) => {
               if (!current) return current;
               const started = applyTurnStarted(current, params);
@@ -229,6 +310,15 @@ export function App() {
             );
           }
           if (message.method === "turn/completed") {
+            if (params.threadId) {
+              setThreads((current) =>
+                current.map((thread) =>
+                  thread.id === params.threadId
+                    ? { ...thread, status: { type: "idle" } }
+                    : thread,
+                ),
+              );
+            }
             setActive((current) => {
               if (!current) return current;
               const completed = applyCompletedTurn(current, params);
@@ -237,6 +327,19 @@ export function App() {
               return completed;
             });
             void loadThreads(client);
+          }
+          if (
+            message.method === "thread/status/changed" &&
+            params.threadId &&
+            params.status
+          ) {
+            setThreads((current) =>
+              current.map((thread) =>
+                thread.id === params.threadId
+                  ? { ...thread, status: params.status }
+                  : thread,
+              ),
+            );
           }
           if (
             message.method === "thread/settings/updated" &&
@@ -263,8 +366,9 @@ export function App() {
             }
             setActiveSettingsSynchronized(true);
           }
-        });
-        client.onRequest((request) => {
+      },
+      onRequest: (_backendId, request, source) => {
+          const client = source as AppServerClient;
           if (
             request.method === "item/commandExecution/requestApproval" ||
             request.method === "item/fileChange/requestApproval" ||
@@ -279,12 +383,13 @@ export function App() {
               `Codex Mobile Web 暂不支持服务器请求：${request.method}`,
             );
           }
-        });
-        try {
-          await client.initialize();
-          if (!disposed) {
-            setConnection("online");
-            setError("");
+      },
+      onReady: (_backendId, source) => {
+        const client = source as AppServerClient;
+        clientRef.current = client;
+        void (async () => {
+          try {
+            if (!disposed && manager.client(backend.id) === source) {
             const [modelResult, permissionResult, configResult] = await Promise.all([
               client.request<{ data: AnyRecord[] }>("model/list", {
                 limit: 100,
@@ -301,6 +406,7 @@ export function App() {
                 })
                 .catch(() => ({ config: {} })),
             ]);
+            if (disposed || manager.client(backend.id) !== source) return;
             const availableProfiles = permissionResult.data.filter(
               (profile) => profile.allowed,
             );
@@ -353,7 +459,11 @@ export function App() {
             const currentThread = activeRef.current;
             if (currentThread?.id) {
               const resumed = await resumeThreadSession(client, currentThread.id);
-              if (!disposed && activeRef.current?.id === currentThread.id) {
+              if (
+                !disposed &&
+                manager.client(backend.id) === source &&
+                activeRef.current?.id === currentThread.id
+              ) {
                 const resumedSettings = normalizeModelSettings(
                   modelResult.data.find(
                     (model) => model.model === resumed.model,
@@ -380,28 +490,29 @@ export function App() {
               }
             }
           }
-        } catch (reason) {
-          if (!disposed) setError(reason instanceof Error ? reason.message : String(reason));
-        }
-      });
-      socket.addEventListener("close", () => {
-        if (!disposed) {
-          if (socketRef.current === socket) clientRef.current = null;
-          setConnection("offline");
-          setBusy(false);
-          setRequests([]);
-          const delay = Math.min(15_000, 750 * 2 ** retryAttempt++);
-          retry = window.setTimeout(connect, delay);
-        }
-      });
-    };
-    connect();
+          } catch (reason) {
+            if (!disposed) {
+              setError(
+                reason instanceof Error ? reason.message : String(reason),
+              );
+              if (manager.client(backend.id) === source) {
+                manager.socket(backend.id)?.close(
+                  1011,
+                  "workspace initialization failed",
+                );
+              }
+            }
+          }
+        })();
+      },
+    });
+    manager.sync([backend]);
     return () => {
       disposed = true;
-      if (retry) clearTimeout(retry);
-      socketRef.current?.close();
+      manager.close();
+      clientRef.current = null;
     };
-  }, []);
+  }, [backend.baseUrl, backend.id, backend.token]);
 
   const visibleThreads = useMemo(
     () => threads.filter((thread) => titleOf(thread).toLowerCase().includes(query.toLowerCase())),
@@ -512,43 +623,54 @@ export function App() {
           approvalsReviewer: selectedApprovalsReviewer,
         });
         thread = started.thread;
+        setThreads((current) => [
+          { ...thread!, status: { type: "active" } },
+          ...current.filter((entry) => entry.id !== thread!.id),
+        ]);
         const startedModel = started.model || selectedModel;
         const startedSettings = normalizeModelSettings(
           models.find((model) => model.model === startedModel),
           started.reasoningEffort ?? selectedEffort,
           started.serviceTier ?? selectedServiceTier,
         );
-        if (started.model) setSelectedModel(started.model);
-        setSelectedEffort(startedSettings.effort);
-        setSelectedServiceTier(startedSettings.serviceTier);
-        if (started.approvalPolicy) {
-          setSelectedApprovalPolicy(started.approvalPolicy);
+        if (draftContext === draftContextGenerationRef.current) {
+          if (started.model) setSelectedModel(started.model);
+          setSelectedEffort(startedSettings.effort);
+          setSelectedServiceTier(startedSettings.serviceTier);
+          if (started.approvalPolicy) {
+            setSelectedApprovalPolicy(started.approvalPolicy);
+          }
+          if (started.approvalsReviewer) {
+            setSelectedApprovalsReviewer(started.approvalsReviewer);
+          }
+          if (started.activePermissionProfile?.id) {
+            setSelectedPermission(started.activePermissionProfile.id);
+          }
+          setActiveSettingsSynchronized(true);
+          setActive(thread);
         }
-        if (started.approvalsReviewer) {
-          setSelectedApprovalsReviewer(started.approvalsReviewer);
-        }
-        if (started.activePermissionProfile?.id) {
-          setSelectedPermission(started.activePermissionProfile.id);
-        }
-        setActiveSettingsSynchronized(true);
-        setActive(thread);
       }
       const localItem = {
         id: `local-${pendingTurnId}`,
         type: "userMessage",
         content: buildOptimisticUserContent(text, pendingImages),
       };
-      setActive((current) => ({
-        ...(current ?? thread!),
-        turns: [
-          ...(current?.turns ?? thread!.turns ?? []),
-          {
-            id: pendingTurnId,
-            status: "inProgress",
-            items: [localItem],
-          },
-        ],
-      }));
+      if (draftContext === draftContextGenerationRef.current) {
+        setActive((current) => {
+          if (!current || current.id !== thread!.id) return current;
+          return {
+            ...current,
+            turns: [
+              ...(current.turns ?? thread!.turns ?? []),
+              {
+                id: pendingTurnId,
+                status: "inProgress",
+                items: [localItem],
+              },
+            ],
+          };
+        });
+      }
       const startedTurn = await clientRef.current.request<{ turn: AnyRecord }>("turn/start", {
         threadId: thread.id,
         input: buildTurnInput(text, pendingImages),
@@ -569,14 +691,26 @@ export function App() {
             }
           : {}),
       });
-      setActive((current) => {
-        if (!current) return current;
-        return applyTurnStarted(current, {
-          threadId: thread!.id,
-          turn: startedTurn.turn,
+      if (draftContext === draftContextGenerationRef.current) {
+        setActive((current) => {
+          if (!current) return current;
+          return applyTurnStarted(current, {
+            threadId: thread!.id,
+            turn: startedTurn.turn,
+          });
         });
-      });
+      }
     } catch (reason) {
+      if (thread?.id) {
+        setThreads((current) =>
+          current.map((entry) =>
+            entry.id === thread!.id
+              ? { ...entry, status: { type: "idle" } }
+              : entry,
+          ),
+        );
+        void loadThreads().catch(() => undefined);
+      }
       if (draftContext === draftContextGenerationRef.current) {
         setBusy(false);
         setActive((current) =>
@@ -766,7 +900,10 @@ export function App() {
       ) : (
         <ThreadListPage
           connection={connection}
-          hostname={location.hostname}
+          hostname={new URL(backend.baseUrl).hostname}
+          backends={backends}
+          summaries={summaries}
+          selectedBackendId={backend.id}
           threadListState={threadListState}
           visibleThreads={visibleThreads}
           totalThreadCount={threads.length}
@@ -777,6 +914,8 @@ export function App() {
           onQueryChange={setQuery}
           onOpenThread={openThread}
           onNewChat={startNewChat}
+          onSelectBackend={onSelectBackend}
+          onManageBackends={onManageBackends}
         />
       )}
       <ApprovalSheet
@@ -810,5 +949,142 @@ export function App() {
         onChoosePermissionMode={choosePermissionMode}
       />
     </main>
+  );
+}
+
+export function App() {
+  const [registry, setRegistry] = useState<BackendRegistry>(() => {
+    const token = new URLSearchParams(window.location.search).get("token") ?? "";
+    const initial = loadBackendRegistry(
+      window.localStorage,
+      window.location.origin,
+      token,
+    );
+    saveBackendRegistry(window.localStorage, initial);
+    return initial;
+  });
+  const [summaries, setSummaries] = useState<
+    Record<string, BackendRuntimeSummary>
+  >({});
+  const [managerOpen, setManagerOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    for (const backend of registry.backends) {
+      if (!backend.enabled || backend.hostId) continue;
+      void fetchBackendHostInfo(backend)
+        .then((host) => {
+          if (cancelled || !host.hostId.trim()) return;
+          setRegistry((current) => {
+            const target = current.backends.find(
+              (entry) => entry.id === backend.id,
+            );
+            if (
+              !target ||
+              target.hostId ||
+              target.baseUrl !== backend.baseUrl
+            ) {
+              return current;
+            }
+            const next = assignBackendHostId(
+              current,
+              backend.id,
+              host.hostId,
+            );
+            if (next === current) return current;
+            saveBackendRegistry(window.localStorage, next);
+            return next;
+          });
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [registry.backends]);
+
+  const enabledBackends = registry.backends.filter(
+    (backend) => backend.enabled,
+  );
+  const mountedBackends = enabledBackends.length
+    ? enabledBackends
+    : registry.backends.slice(0, 1);
+  const selectedBackend =
+    mountedBackends.find(
+      (backend) => backend.id === registry.selectedBackendId,
+    ) ?? mountedBackends[0];
+
+  const persistRegistry = useCallback((next: BackendRegistry) => {
+    saveBackendRegistry(window.localStorage, next);
+    setRegistry(
+      loadBackendRegistry(window.localStorage, window.location.origin),
+    );
+  }, []);
+
+  const selectBackend = useCallback((backendId: string) => {
+    setRegistry((current) => {
+      const target = current.backends.find(
+        (backend) => backend.id === backendId && backend.enabled,
+      );
+      if (!target || current.selectedBackendId === backendId) return current;
+      const next = { ...current, selectedBackendId: backendId };
+      saveBackendRegistry(window.localStorage, next);
+      return next;
+    });
+  }, []);
+
+  const updateSummary = useCallback((summary: BackendRuntimeSummary) => {
+    setSummaries((current) => {
+      const previous = current[summary.backendId];
+      if (
+        previous &&
+        previous.connection === summary.connection &&
+        previous.busy === summary.busy &&
+        previous.approvalCount === summary.approvalCount &&
+        previous.error === summary.error
+      ) {
+        return current;
+      }
+      return { ...current, [summary.backendId]: summary };
+    });
+  }, []);
+
+  if (!selectedBackend) {
+    return <main className="app-shell"><div className="empty-state">没有可用设备</div></main>;
+  }
+
+  return (
+    <>
+      {mountedBackends.map((backend) => (
+        <div
+          className="backend-workspace"
+          hidden={backend.id !== selectedBackend.id}
+          key={`${backend.id}:${backend.baseUrl}:${backend.token}`}
+        >
+          <BackendWorkspace
+            backend={backend}
+            visible={backend.id === selectedBackend.id}
+            backends={registry.backends}
+            summaries={summaries}
+            onSelectBackend={selectBackend}
+            onManageBackends={() => setManagerOpen(true)}
+            onSummaryChange={updateSummary}
+          />
+        </div>
+      ))}
+      <BackendAttentionBanner
+        backends={registry.backends}
+        summaries={summaries}
+        selectedBackendId={selectedBackend.id}
+        onSelect={selectBackend}
+      />
+      <BackendManagerSheet
+        open={managerOpen}
+        registry={registry}
+        summaries={summaries}
+        onChange={persistRegistry}
+        onClose={() => setManagerOpen(false)}
+      />
+    </>
   );
 }

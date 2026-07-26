@@ -9,10 +9,18 @@ import {
   type DisplayRecord,
   type ThreadListState,
 } from "../../ui/app-display";
+import type {
+  BackendConfig,
+  BackendRuntimeSummary,
+} from "../../backends/types";
+import { BackendSwitcher } from "../backends/BackendSwitcher";
 
 export function ThreadListPage({
   connection,
   hostname,
+  backends,
+  summaries,
+  selectedBackendId,
   threadListState,
   visibleThreads,
   totalThreadCount,
@@ -23,9 +31,14 @@ export function ThreadListPage({
   onQueryChange,
   onOpenThread,
   onNewChat,
+  onSelectBackend,
+  onManageBackends,
 }: {
   connection: ConnectionState;
   hostname: string;
+  backends: BackendConfig[];
+  summaries: Record<string, BackendRuntimeSummary>;
+  selectedBackendId: string;
   threadListState: ThreadListState;
   visibleThreads: DisplayRecord[];
   totalThreadCount: number;
@@ -36,6 +49,8 @@ export function ThreadListPage({
   onQueryChange: (value: string) => void;
   onOpenThread: (thread: DisplayRecord) => void | Promise<void>;
   onNewChat: () => void;
+  onSelectBackend: (backendId: string) => void;
+  onManageBackends: () => void;
 }) {
   return (
     <section className="thread-list-page">
@@ -45,9 +60,21 @@ export function ThreadListPage({
           <h1>Remote</h1>
           <p><i className={`status-dot ${connection}`} /> {hostname} · {connection === "online" ? "已连接" : connection === "offline" ? "已断开" : "连接中"}</p>
         </div>
-        <button className="round-button" aria-label="更多"><AppIcon name="more" /></button>
+        <button
+          className="round-button"
+          aria-label="管理设备"
+          onClick={onManageBackends}
+        >
+          <AppIcon name="more" />
+        </button>
       </header>
-      <div className="host-pill"><i className={`status-dot ${connection}`} />▰ <strong>{hostname}</strong></div>
+      <BackendSwitcher
+        backends={backends}
+        summaries={summaries}
+        selectedBackendId={selectedBackendId}
+        onSelect={onSelectBackend}
+        onManage={onManageBackends}
+      />
       <h2>最近</h2>
       <div className="thread-list">
         {threadListState === "loading" && (
