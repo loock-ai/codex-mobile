@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { TurnCard } from "../../src/features/conversation/Timeline";
 import {
   applyCompletedTurn,
   applyFileChangePatch,
@@ -23,6 +24,51 @@ import {
 } from "../../src/ui/conversation";
 
 describe("移动端对话格式", () => {
+  it("没有用户消息的回合不显示伪用户气泡", () => {
+    const { container, rerender } = render(
+      <TurnCard
+        turn={{
+          id: "assistant-only",
+          status: "completed",
+          items: [
+            {
+              id: "a1",
+              type: "agentMessage",
+              phase: "final_answer",
+              text: "自动执行结果",
+            },
+          ],
+        }}
+        client={null}
+      />,
+    );
+
+    expect(screen.queryByText("Codex 回合")).toBeNull();
+    expect(container.querySelector(".turn-user")).toBeNull();
+    expect(screen.queryByText("自动执行结果")).not.toBeNull();
+
+    rerender(
+      <TurnCard
+        turn={{
+          id: "normal",
+          status: "completed",
+          items: [
+            { id: "u1", type: "userMessage", text: "真实问题" },
+            {
+              id: "a2",
+              type: "agentMessage",
+              phase: "final_answer",
+              text: "正常回答",
+            },
+          ],
+        }}
+        client={null}
+      />,
+    );
+    expect(container.querySelector(".turn-user")).not.toBeNull();
+    expect(screen.queryByText("真实问题")).not.toBeNull();
+  });
+
   it("相对时间使用数字在前、单位在后", () => {
     expect(relativeTime(100, 220)).toBe("2 分钟");
     expect(relativeTime(100, 7_300)).toBe("2 小时");

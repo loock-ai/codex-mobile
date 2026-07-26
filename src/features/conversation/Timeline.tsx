@@ -234,13 +234,11 @@ export function TurnCard({
     );
   return (
     <section className="turn-card">
-      <div className="turn-user">
-        {grouped.user ? (
+      {grouped.user && (
+        <div className="turn-user">
           <UserBubble item={grouped.user} client={client} />
-        ) : (
-          <div className="user-bubble">Codex 回合</div>
-        )}
-      </div>
+        </div>
+      )}
       <div className="turn-responses">
         {grouped.running ? (
           <>
