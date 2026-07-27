@@ -17,11 +17,12 @@ button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; 
 .conversation-sidebar-layer.open .conversation-sidebar { transform: translateX(0); }
 .conversation-sidebar-scrim { position: absolute; inset-block: 0; right: 0; width: 15%; border: 0; background: rgba(10,10,10,.24); opacity: 0; transition: opacity .2s ease; }
 .conversation-sidebar-layer.open .conversation-sidebar-scrim { opacity: 1; }
-.thread-list-page { position: relative; height: 100dvh; min-height: 100dvh; overflow-y: auto; overscroll-behavior: contain; padding: calc(var(--safe-area-top) + 68px) 16px 58px; }
+.thread-list-page { position: relative; height: 100dvh; min-height: 100dvh; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px 58px; }
 .conversation { height: 100dvh; min-height: 0; overflow: hidden; display: grid; grid-template-rows: auto minmax(0,1fr); padding: var(--safe-area-top) 18px 0; }
-.list-header, .conversation-header { position: sticky; top: 0; z-index: 3; display: grid; align-items: center; background: rgba(255,255,255,.96); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
-.list-header { position: fixed; inset: 0 0 auto; grid-template-columns: minmax(0,1fr) auto; gap: 10px; min-height: calc(var(--safe-area-top) + 68px); padding: calc(var(--safe-area-top) + 10px) 16px 7px; }
-.conversation-header { grid-template-columns: 50px minmax(0,1fr) auto; gap: 10px; min-height: 68px; }
+.list-header, .conversation-header { display: grid; align-items: center; }
+.thread-list-sticky { position: sticky; top: 0; z-index: 3; margin: 0 -16px; padding: 0 16px 7px; background: rgba(255,255,255,.96); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+.list-header { position: static; grid-template-columns: minmax(0,1fr) auto; gap: 10px; min-height: calc(var(--safe-area-top) + 68px); padding: calc(var(--safe-area-top) + 10px) 0 7px; }
+.conversation-header { position: sticky; top: 0; z-index: 3; grid-template-columns: 50px minmax(0,1fr) auto; gap: 10px; min-height: 68px; background: rgba(255,255,255,.96); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
 .list-header > div { min-width: 0; text-align: left; }
 .thread-heading { min-width: 0; text-align: center; }
 .list-header h1 { margin: 0; font-size: 20px; line-height: 1.1; letter-spacing: -.35px; }

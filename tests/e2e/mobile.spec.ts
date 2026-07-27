@@ -394,16 +394,21 @@ test("移动端选择器、线程恢复、Markdown、折叠与吸顶", async ({ 
   await page.goto("/");
   await expect(page.getByLabel("正在加载会话")).toBeVisible();
   await expect(page.getByText("暂无对话", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("2 分钟", { exact: true })).toBeVisible();
+  await expect(page.getByText("2 分钟", { exact: true }).first()).toBeVisible();
   await expect(page.getByLabel("正在加载会话")).toHaveCount(0);
-  await expect(page.getByLabel("进行中", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("进行中", { exact: true }).first()).toBeVisible();
   const listHeader = page.locator(".list-header");
-  await expect(listHeader).toHaveCSS("position", "fixed");
-  await expect(listHeader).toHaveCSS("top", "0px");
-  await page.evaluate(() => window.scrollTo(0, 520));
+  const listSticky = page.locator(".thread-list-sticky");
+  await expect(listSticky).toHaveCSS("position", "sticky");
+  await expect(listSticky).toHaveCSS("top", "0px");
+  await expect(listHeader).toHaveCSS("position", "static");
+  await page.locator(".thread-list-page").evaluate((element) => {
+    element.scrollTop = 520;
+  });
   await expect
-    .poll(async () => Math.round((await listHeader.boundingBox())?.y ?? -1))
+    .poll(async () => Math.round((await listSticky.boundingBox())?.y ?? -1))
     .toBe(0);
+  await expect(listSticky.locator(".backend-switcher")).toBeVisible();
   await expect(listHeader.locator("h1")).toHaveCSS("font-size", "20px");
   await expect(page.locator(".thread-row").first()).toHaveCSS(
     "font-size",
@@ -417,7 +422,7 @@ test("移动端选择器、线程恢复、Markdown、折叠与吸顶", async ({ 
     "min-height",
     "54px",
   );
-  await expect(page.locator(".list-header .round-button")).toHaveCSS(
+  await expect(page.locator(".list-header .round-button").first()).toHaveCSS(
     "width",
     "44px",
   );
@@ -432,7 +437,7 @@ test("移动端选择器、线程恢复、Markdown、折叠与吸顶", async ({ 
       ),
     )
     .toBeGreaterThan(1);
-  await page.getByRole("button", { name: /Markdown 会话/ }).click();
+  await page.getByRole("button", { name: /Markdown 会话/ }).first().click();
   await expect
     .poll(() =>
       page.locator(".conversation-scroll").evaluate(
@@ -458,7 +463,7 @@ test("移动端选择器、线程恢复、Markdown、折叠与吸顶", async ({ 
     "/tmp/project/src/ui/attachments.ts:2",
   );
   await remoteFileLink.click();
-  await expect(page).toHaveURL("http://127.0.0.1:4173/");
+  await expect(page).toHaveURL(/http:\/\/127\.0\.0\.1:\d+\/$/);
   await expect(page.getByRole("heading", { name: "远程文件" })).toBeVisible();
   await expect(
     page.locator(

@@ -96,6 +96,15 @@ function renderList(
 }
 
 describe("会话侧边栏列表", () => {
+  it("头部和机器选项位于同一个吸顶容器", () => {
+    const { container } = renderList("mini");
+    const sticky = container.querySelector(".thread-list-sticky");
+
+    expect(sticky).not.toBeNull();
+    expect(sticky?.querySelector(".list-header")).not.toBeNull();
+    expect(sticky?.querySelector(".backend-switcher")).not.toBeNull();
+  });
+
   it("全部视图把置顶独立展示且保留机器项目来源", () => {
     const { container } = renderList("all");
     const view = within(container);

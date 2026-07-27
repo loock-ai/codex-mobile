@@ -123,46 +123,48 @@ export function ThreadListPage({
 
   return (
     <section className="thread-list-page">
-      <header className="list-header">
-        <div>
-          <h1>Codex Mobile</h1>
-          <p>
-            <i
-              className={`status-dot ${
-                onlineCount ? "online" : "connecting"
-              }`}
-            />
-            {selectedBackend
-              ? `${selectedBackend.name} · ${
-                  selectedSummary?.connection === "online"
-                    ? "已连接"
-                    : selectedSummary?.connection === "offline"
-                      ? "已断开"
-                      : "连接中"
-                }`
-              : `${enabledBackends.length} 台机器 · ${onlineCount} 台已连接`}
-          </p>
-        </div>
-        <div className="list-header-actions">
-          <button className="round-button" aria-label="刷新会话列表" onClick={onRefresh}>
-            <AppIcon name="refresh" />
-          </button>
-          <button
-            className="round-button"
-            aria-label="管理设备"
-            onClick={onManageBackends}
-          >
-            <AppIcon name="more" />
-          </button>
-        </div>
-      </header>
-      <BackendSwitcher
-        backends={backends}
-        summaries={summaries}
-        selectedBackendId={selectedBackendId}
-        loadingBackendIds={loadingBackendIds}
-        onSelect={onSelectBackend}
-      />
+      <div className="thread-list-sticky">
+        <header className="list-header">
+          <div>
+            <h1>Codex Mobile</h1>
+            <p>
+              <i
+                className={`status-dot ${
+                  onlineCount ? "online" : "connecting"
+                }`}
+              />
+              {selectedBackend
+                ? `${selectedBackend.name} · ${
+                    selectedSummary?.connection === "online"
+                      ? "已连接"
+                      : selectedSummary?.connection === "offline"
+                        ? "已断开"
+                        : "连接中"
+                  }`
+                : `${enabledBackends.length} 台机器 · ${onlineCount} 台已连接`}
+            </p>
+          </div>
+          <div className="list-header-actions">
+            <button className="round-button" aria-label="刷新会话列表" onClick={onRefresh}>
+              <AppIcon name="refresh" />
+            </button>
+            <button
+              className="round-button"
+              aria-label="管理设备"
+              onClick={onManageBackends}
+            >
+              <AppIcon name="more" />
+            </button>
+          </div>
+        </header>
+        <BackendSwitcher
+          backends={backends}
+          summaries={summaries}
+          selectedBackendId={selectedBackendId}
+          loadingBackendIds={loadingBackendIds}
+          onSelect={onSelectBackend}
+        />
+      </div>
       <div className="thread-list">
         {threadListState === "loading" && (
           <div
