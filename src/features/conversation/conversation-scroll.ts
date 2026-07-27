@@ -31,6 +31,7 @@ export function useConversationAutoScroll({
   const contentRef = useRef<HTMLDivElement | null>(null);
   const followingRef = useRef(true);
   const frameRef = useRef<number | null>(null);
+  const prependScrollHeightRef = useRef<number | null>(null);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
 
   const scrollToLatest = useCallback(() => {
@@ -57,13 +58,32 @@ export function useConversationAutoScroll({
     setShowJumpToLatest(!following);
   }, []);
 
+  const beginPrependPreservation = useCallback(() => {
+    const target = scrollRef.current;
+    if (!target) return;
+    followingRef.current = false;
+    prependScrollHeightRef.current = target.scrollHeight;
+  }, []);
+
+  const cancelPrependPreservation = useCallback(() => {
+    prependScrollHeightRef.current = null;
+  }, []);
+
   useLayoutEffect(() => {
     followingRef.current = true;
+    prependScrollHeightRef.current = null;
     setShowJumpToLatest(false);
     if (ready) scheduleScrollToLatest();
   }, [ready, scheduleScrollToLatest, threadId]);
 
   useLayoutEffect(() => {
+    const target = scrollRef.current;
+    if (target && prependScrollHeightRef.current != null) {
+      const previousScrollHeight = prependScrollHeightRef.current;
+      prependScrollHeightRef.current = null;
+      target.scrollTop += target.scrollHeight - previousScrollHeight;
+      return;
+    }
     if (ready && followingRef.current) scheduleScrollToLatest();
   }, [contentRevision, ready, scheduleScrollToLatest]);
 
@@ -92,5 +112,7 @@ export function useConversationAutoScroll({
     onScroll,
     scrollToLatest,
     showJumpToLatest,
+    beginPrependPreservation,
+    cancelPrependPreservation,
   };
 }

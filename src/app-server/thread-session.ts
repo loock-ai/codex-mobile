@@ -4,6 +4,7 @@ import type {
 } from "../ui/settings";
 
 type AnyRecord = Record<string, any>;
+const initialTurnsLimit = 10;
 
 interface Requester {
   request(method: string, params: unknown): Promise<any>;
@@ -18,6 +19,51 @@ export interface ResumedThreadSession {
   approvalsReviewer?: ApprovalsReviewer;
   activePermissionProfile?: { id: string } | null;
   settingsSynchronized: boolean;
+  nextTurnsCursor: string | null;
+}
+
+export interface ThreadTurnsPage {
+  turns: AnyRecord[];
+  nextCursor: string | null;
+}
+
+export type OlderTurnsLoadState =
+  | "idle"
+  | "loading"
+  | "error"
+  | "exhausted";
+
+function chronologicalTurns(data: AnyRecord[] | undefined) {
+  return [...(data ?? [])].reverse();
+}
+
+export function prependUniqueTurns(
+  current: AnyRecord[],
+  older: AnyRecord[],
+) {
+  const currentIds = new Set(current.map((turn) => String(turn.id)));
+  return [
+    ...older.filter((turn) => !currentIds.has(String(turn.id))),
+    ...current,
+  ];
+}
+
+export async function loadOlderThreadTurns(
+  client: Requester,
+  threadId: string,
+  cursor: string,
+): Promise<ThreadTurnsPage> {
+  const response = await client.request("thread/turns/list", {
+    threadId,
+    cursor,
+    limit: initialTurnsLimit,
+    sortDirection: "desc",
+    itemsView: "full",
+  });
+  return {
+    turns: chronologicalTurns(response.data),
+    nextCursor: response.nextCursor ?? null,
+  };
 }
 
 export async function resumeThreadSession(
@@ -25,9 +71,23 @@ export async function resumeThreadSession(
   threadId: string,
 ): Promise<ResumedThreadSession> {
   try {
-    const response = await client.request("thread/resume", { threadId });
+    const response = await client.request("thread/resume", {
+      threadId,
+      excludeTurns: true,
+      initialTurnsPage: {
+        limit: initialTurnsLimit,
+        sortDirection: "desc",
+        itemsView: "full",
+      },
+    });
+    const initialTurnsPage = response.initialTurnsPage;
     return {
-      thread: response.thread,
+      thread: {
+        ...response.thread,
+        turns: initialTurnsPage?.data
+          ? chronologicalTurns(initialTurnsPage.data)
+          : response.thread.turns ?? [],
+      },
       model: response.model,
       reasoningEffort: response.reasoningEffort,
       serviceTier: response.serviceTier,
@@ -35,6 +95,7 @@ export async function resumeThreadSession(
       approvalsReviewer: response.approvalsReviewer,
       activePermissionProfile: response.activePermissionProfile,
       settingsSynchronized: true,
+      nextTurnsCursor: initialTurnsPage?.nextCursor ?? null,
     };
   } catch {
     const response = await client.request("thread/read", {
@@ -44,6 +105,7 @@ export async function resumeThreadSession(
     return {
       thread: response.thread,
       settingsSynchronized: false,
+      nextTurnsCursor: null,
     };
   }
 }

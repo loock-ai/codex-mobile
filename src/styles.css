@@ -142,6 +142,9 @@ button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; 
 .conversation-scroll::-webkit-scrollbar { display: none; }
 .conversation-scroll-content { min-height: 100%; }
 .timeline { min-width: 0; max-width: 100%; padding: 22px 0 105px; }
+.older-turns-control, .older-turns-status { width: fit-content; min-height: 38px; margin: 0 auto 10px; border: 0; background: transparent; color: #777; display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12px; }
+.older-turns-control.error { color: #a44a42; }
+.older-turns-status .action-spinner { width: 14px; height: 14px; }
 .conversation-skeleton { display: grid; gap: 15px; padding: 4px 0; }
 .conversation-skeleton i { display: block; height: 13px; border-radius: 999px; background: #ececec; animation: thread-skeleton-pulse 1.35s ease-in-out infinite; }
 .conversation-skeleton i:nth-child(1) { width: 62%; height: 66px; margin-left: auto; border-radius: 22px; }

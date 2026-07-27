@@ -20,7 +20,12 @@ import {
   isThreadRunning,
   removePendingTurn,
 } from "./ui/conversation";
-import { resumeThreadSession } from "./app-server/thread-session";
+import {
+  loadOlderThreadTurns,
+  prependUniqueTurns,
+  resumeThreadSession,
+  type OlderTurnsLoadState,
+} from "./app-server/thread-session";
 import {
   activeThreadAfterArchive,
   setThreadPinned,
@@ -175,6 +180,8 @@ function BackendWorkspace({
   const [conversationLoadState, setConversationLoadState] =
     useState<ConversationLoadState>("idle");
   const [conversationLoadError, setConversationLoadError] = useState("");
+  const [olderTurnsState, setOlderTurnsState] =
+    useState<OlderTurnsLoadState>("exhausted");
   const [tokenUsageByThread, setTokenUsageByThread] = useState<
     Record<string, AnyRecord>
   >({});
@@ -190,6 +197,9 @@ function BackendWorkspace({
   const conversationVisibleRef = useRef(conversationVisible);
   const activeThreadTargetRef = useRef<string | null>(null);
   const openSequenceRef = useRef(0);
+  const olderTurnsCursorRef = useRef<string | null>(null);
+  const olderTurnsGenerationRef = useRef(0);
+  const olderTurnsLoadingRef = useRef(false);
   const fullyLoadedProjectCwdsRef = useRef(new Set<string>());
   const localPinnedKey = `codex-mobile:pinned:${backend.id}`;
   const readLocalPinned = () => {
@@ -709,6 +719,7 @@ function BackendWorkspace({
                     resumed.thread.isPinned === true ||
                     localPinned.has(String(resumed.thread.id)),
                 });
+                resetOlderTurns(resumed.nextTurnsCursor);
                 setConversationLoadState("ready");
                 setConversationLoadError("");
                 setActiveSettingsSynchronized(resumed.settingsSynchronized);
@@ -764,6 +775,62 @@ function BackendWorkspace({
     invalidateImageReads();
   }
 
+  function resetOlderTurns(cursor: string | null = null) {
+    olderTurnsGenerationRef.current += 1;
+    olderTurnsLoadingRef.current = false;
+    olderTurnsCursorRef.current = cursor;
+    setOlderTurnsState(cursor ? "idle" : "exhausted");
+  }
+
+  async function loadOlderTurns() {
+    const client = clientRef.current;
+    const threadId = String(activeRef.current?.id ?? "");
+    const cursor = olderTurnsCursorRef.current;
+    if (olderTurnsLoadingRef.current) return true;
+    if (!client || !threadId || !cursor) {
+      return false;
+    }
+
+    const generation = olderTurnsGenerationRef.current;
+    olderTurnsLoadingRef.current = true;
+    setOlderTurnsState("loading");
+    try {
+      const page = await loadOlderThreadTurns(client, threadId, cursor);
+      if (
+        generation !== olderTurnsGenerationRef.current ||
+        String(activeRef.current?.id ?? "") !== threadId
+      ) {
+        return false;
+      }
+      setActive((current) =>
+        current && String(current.id) === threadId
+          ? {
+              ...current,
+              turns: prependUniqueTurns(
+                current.turns ?? [],
+                page.turns,
+              ),
+            }
+          : current,
+      );
+      olderTurnsCursorRef.current = page.nextCursor;
+      setOlderTurnsState(page.nextCursor ? "idle" : "exhausted");
+      return true;
+    } catch {
+      if (
+        generation === olderTurnsGenerationRef.current &&
+        String(activeRef.current?.id ?? "") === threadId
+      ) {
+        setOlderTurnsState("error");
+      }
+      return false;
+    } finally {
+      if (generation === olderTurnsGenerationRef.current) {
+        olderTurnsLoadingRef.current = false;
+      }
+    }
+  }
+
   async function loadThreadDetail(threadId: string, sequence: number) {
     const client = clientRef.current;
     try {
@@ -792,6 +859,7 @@ function BackendWorkspace({
           session.thread.isPinned === true ||
           localPinned.has(String(session.thread.id)),
       });
+      resetOlderTurns(session.nextTurnsCursor);
       setActiveSettingsSynchronized(session.settingsSynchronized);
       setSelectedModel(session.model ?? "");
       setSelectedEffort(resumedSettings.effort);
@@ -863,6 +931,7 @@ function BackendWorkspace({
     setBusy(false);
     setConversationLoadError("");
     setConversationLoadState("loading");
+    resetOlderTurns();
     activeThreadTargetRef.current = thread.id;
     setActive({
       ...thread,
@@ -879,6 +948,7 @@ function BackendWorkspace({
     setOpeningThreadId(threadId);
     setConversationLoadError("");
     setConversationLoadState("loading");
+    resetOlderTurns();
     void loadThreadDetail(threadId, sequence);
   }
 
@@ -1290,6 +1360,7 @@ function BackendWorkspace({
     setDraftImages(nextDraftImages);
     setConversationLoadState("ready");
     setConversationLoadError("");
+    resetOlderTurns();
     setActiveSettingsSynchronized(true);
     setActive({
       id: "",
@@ -1378,6 +1449,7 @@ function BackendWorkspace({
           projectOptions={projectOptions}
           loadState={conversationLoadState}
           loadError={conversationLoadError}
+          olderTurnsState={olderTurnsState}
           connection={connection}
           client={clientRef.current}
           error={error}
@@ -1402,6 +1474,7 @@ function BackendWorkspace({
           onRename={renameThread}
           onArchive={archiveThread}
           onRetry={retryThreadDetail}
+          onLoadOlderTurns={loadOlderTurns}
           onSubmit={send}
           onRemoveImage={(imageId) =>
             setDraftImages((current) =>

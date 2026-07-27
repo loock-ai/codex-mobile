@@ -1,9 +1,11 @@
 import {
   type FormEvent,
   type RefObject,
+  type UIEventHandler,
   useState,
 } from "react";
 import { AppServerClient } from "../../app-server/client";
+import type { OlderTurnsLoadState } from "../../app-server/thread-session";
 import type { BackendConfig } from "../../backends/types";
 import {
   MAX_DRAFT_IMAGES,
@@ -36,6 +38,7 @@ export function ConversationPage({
   projectOptions,
   loadState,
   loadError,
+  olderTurnsState,
   connection,
   client,
   error,
@@ -58,6 +61,7 @@ export function ConversationPage({
   onRename,
   onArchive,
   onRetry,
+  onLoadOlderTurns,
   onSubmit,
   onRemoveImage,
   onSelectImages,
@@ -73,6 +77,7 @@ export function ConversationPage({
   projectOptions: Array<{ cwd: string; name: string }>;
   loadState: ConversationLoadState;
   loadError: string;
+  olderTurnsState: OlderTurnsLoadState;
   connection: ConnectionState;
   client: AppServerClient | null;
   error: string;
@@ -95,6 +100,7 @@ export function ConversationPage({
   onRename: () => Promise<boolean>;
   onArchive: () => Promise<boolean>;
   onRetry: () => void;
+  onLoadOlderTurns: () => Promise<boolean>;
   onSubmit: (event: FormEvent) => void;
   onRemoveImage: (imageId: string) => void;
   onSelectImages: (files: FileList | null) => Promise<void>;
@@ -113,6 +119,8 @@ export function ConversationPage({
     onScroll,
     scrollToLatest,
     showJumpToLatest,
+    beginPrependPreservation,
+    cancelPrependPreservation,
   } = useConversationAutoScroll({
     threadId: String(active.id ?? `new:${backendId}`),
     contentRevision: active.turns,
@@ -120,6 +128,22 @@ export function ConversationPage({
   });
   const interactive =
     loadState === "ready" && (!isNewChat || !!active.cwd);
+  const requestOlderTurns = () => {
+    if (!["idle", "error"].includes(olderTurnsState)) return;
+    beginPrependPreservation();
+    void onLoadOlderTurns().then((loaded) => {
+      if (!loaded) cancelPrependPreservation();
+    });
+  };
+  const handleScroll: UIEventHandler<HTMLDivElement> = (event) => {
+    onScroll(event);
+    if (
+      event.currentTarget.scrollTop <= 48 &&
+      olderTurnsState === "idle"
+    ) {
+      requestOlderTurns();
+    }
+  };
   return (
     <section className="conversation">
       <header className="conversation-header">
@@ -190,7 +214,7 @@ export function ConversationPage({
       <div
         className="conversation-scroll"
         ref={scrollRef}
-        onScroll={onScroll}
+        onScroll={handleScroll}
       >
         <div className="conversation-scroll-content" ref={contentRef}>
           {isNewChat && (
@@ -250,6 +274,30 @@ export function ConversationPage({
             </section>
           )}
           <div className="timeline" aria-busy={loadState === "loading"}>
+            {loadState === "ready" && olderTurnsState === "idle" && (
+              <button
+                type="button"
+                className="older-turns-control"
+                onClick={requestOlderTurns}
+              >
+                加载更早消息
+              </button>
+            )}
+            {loadState === "ready" && olderTurnsState === "loading" && (
+              <div className="older-turns-status" role="status">
+                <i className="action-spinner" aria-hidden="true" />
+                正在加载更早消息
+              </div>
+            )}
+            {loadState === "ready" && olderTurnsState === "error" && (
+              <button
+                type="button"
+                className="older-turns-control error"
+                onClick={requestOlderTurns}
+              >
+                加载失败，点击重试
+              </button>
+            )}
             {loadState === "loading" ? (
               <div
                 className="conversation-skeleton"

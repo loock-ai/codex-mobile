@@ -1,4 +1,4 @@
-import { fireEvent, render } from "@testing-library/react";
+import { fireEvent, render, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
   isConversationNearBottom,
@@ -18,6 +18,7 @@ function ScrollHarness({
     onScroll,
     scrollToLatest,
     showJumpToLatest,
+    beginPrependPreservation,
   } = useConversationAutoScroll({
     threadId,
     contentRevision: revision,
@@ -31,6 +32,7 @@ function ScrollHarness({
       {showJumpToLatest && (
         <button onClick={scrollToLatest}>回到最新</button>
       )}
+      <button onClick={beginPrependPreservation}>准备插入旧消息</button>
     </>
   );
 }
@@ -100,5 +102,33 @@ describe("对话流式滚动跟随", () => {
     fireEvent.click(getByText("回到最新"));
     expect(scroller.scrollTop).toBe(500);
     expect(queryByText("回到最新")).toBeNull();
+  });
+
+  it("向前插入旧消息后用高度差保持当前阅读位置", () => {
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+    const { container, rerender } = render(
+      <ScrollHarness revision={1} />,
+    );
+    const view = within(container);
+    const scroller = view.getByTestId("scroller");
+    setScrollMetrics(scroller, {
+      scrollHeight: 500,
+      clientHeight: 200,
+      scrollTop: 20,
+    });
+    fireEvent.scroll(scroller);
+    fireEvent.click(view.getByText("准备插入旧消息"));
+
+    setScrollMetrics(scroller, {
+      scrollHeight: 700,
+      clientHeight: 200,
+      scrollTop: 20,
+    });
+    rerender(<ScrollHarness revision={2} />);
+
+    expect(scroller.scrollTop).toBe(220);
   });
 });
