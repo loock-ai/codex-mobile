@@ -4,7 +4,6 @@ import {
   useEffect,
   useLayoutEffect,
   useRef,
-  useState,
 } from "react";
 
 export const conversationBottomThreshold = 80;
@@ -32,14 +31,12 @@ export function useConversationAutoScroll({
   const followingRef = useRef(true);
   const frameRef = useRef<number | null>(null);
   const prependScrollHeightRef = useRef<number | null>(null);
-  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
 
   const scrollToLatest = useCallback(() => {
     const target = scrollRef.current;
     if (!target) return;
     followingRef.current = true;
     target.scrollTop = target.scrollHeight;
-    setShowJumpToLatest(false);
   }, []);
 
   const scheduleScrollToLatest = useCallback(() => {
@@ -55,7 +52,6 @@ export function useConversationAutoScroll({
   const onScroll = useCallback<UIEventHandler<HTMLDivElement>>((event) => {
     const following = isConversationNearBottom(event.currentTarget);
     followingRef.current = following;
-    setShowJumpToLatest(!following);
   }, []);
 
   const beginPrependPreservation = useCallback(() => {
@@ -72,7 +68,6 @@ export function useConversationAutoScroll({
   useLayoutEffect(() => {
     followingRef.current = true;
     prependScrollHeightRef.current = null;
-    setShowJumpToLatest(false);
     if (ready) scheduleScrollToLatest();
   }, [ready, scheduleScrollToLatest, threadId]);
 
@@ -110,8 +105,6 @@ export function useConversationAutoScroll({
     scrollRef,
     contentRef,
     onScroll,
-    scrollToLatest,
-    showJumpToLatest,
     beginPrependPreservation,
     cancelPrependPreservation,
   };

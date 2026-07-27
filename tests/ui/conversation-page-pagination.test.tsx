@@ -58,6 +58,23 @@ function renderConversation(
 }
 
 describe("会话详情历史分页", () => {
+  it("用户上滑后不显示悬浮回到底部按钮", () => {
+    const { container } = renderConversation("exhausted");
+    const scroller = container.querySelector(".conversation-scroll");
+    expect(scroller).not.toBeNull();
+    Object.defineProperties(scroller!, {
+      scrollHeight: { configurable: true, value: 800 },
+      clientHeight: { configurable: true, value: 300 },
+      scrollTop: { configurable: true, value: 100, writable: true },
+    });
+
+    fireEvent.scroll(scroller!);
+
+    expect(
+      within(container).queryByRole("button", { name: "回到最新消息" }),
+    ).toBeNull();
+  });
+
   it("有更早历史时显示入口并只请求一次分页", () => {
     const { container, onLoadOlderTurns } = renderConversation("idle");
     const view = within(container);

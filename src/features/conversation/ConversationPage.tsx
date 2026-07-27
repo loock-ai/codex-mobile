@@ -117,8 +117,6 @@ export function ConversationPage({
     scrollRef,
     contentRef,
     onScroll,
-    scrollToLatest,
-    showJumpToLatest,
     beginPrependPreservation,
     cancelPrependPreservation,
   } = useConversationAutoScroll({
@@ -325,16 +323,6 @@ export function ConversationPage({
           </div>
         </div>
       </div>
-      {showJumpToLatest && (
-        <button
-          type="button"
-          className="jump-to-latest"
-          aria-label="回到最新消息"
-          onClick={scrollToLatest}
-        >
-          ↓
-        </button>
-      )}
       {error && <div className="error-banner" role="alert">{error}</div>}
       <form
         className="composer-wrap"

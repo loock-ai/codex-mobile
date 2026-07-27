@@ -16,8 +16,6 @@ function ScrollHarness({
     scrollRef,
     contentRef,
     onScroll,
-    scrollToLatest,
-    showJumpToLatest,
     beginPrependPreservation,
   } = useConversationAutoScroll({
     threadId,
@@ -29,9 +27,6 @@ function ScrollHarness({
       <div data-testid="scroller" ref={scrollRef} onScroll={onScroll}>
         <div ref={contentRef}>{revision}</div>
       </div>
-      {showJumpToLatest && (
-        <button onClick={scrollToLatest}>回到最新</button>
-      )}
       <button onClick={beginPrependPreservation}>准备插入旧消息</button>
     </>
   );
@@ -79,7 +74,7 @@ describe("对话流式滚动跟随", () => {
       callback(0);
       return 1;
     });
-    const { getByTestId, queryByText, getByText, rerender } = render(
+    const { getByTestId, rerender } = render(
       <ScrollHarness revision={1} />,
     );
     const scroller = getByTestId("scroller");
@@ -94,14 +89,14 @@ describe("对话流式滚动跟随", () => {
 
     scroller.scrollTop = 100;
     fireEvent.scroll(scroller);
-    expect(getByText("回到最新")).not.toBeNull();
 
     rerender(<ScrollHarness revision={3} />);
     expect(scroller.scrollTop).toBe(100);
 
-    fireEvent.click(getByText("回到最新"));
+    scroller.scrollTop = 220;
+    fireEvent.scroll(scroller);
+    rerender(<ScrollHarness revision={4} />);
     expect(scroller.scrollTop).toBe(500);
-    expect(queryByText("回到最新")).toBeNull();
   });
 
   it("向前插入旧消息后用高度差保持当前阅读位置", () => {
