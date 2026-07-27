@@ -7,7 +7,10 @@ import {
   useState,
 } from "react";
 import { AppServerClient, type RpcMessage } from "./app-server/client";
-import { createLatestThreadListLoader } from "./app-server/thread-list-loader";
+import {
+  createLatestThreadListLoader,
+  type ProjectThreadLoadState,
+} from "./app-server/thread-list-loader";
 import {
   applyCompletedTurn,
   applyFileChangePatch,
@@ -19,6 +22,10 @@ import {
 } from "./ui/conversation";
 import { resumeThreadSession } from "./app-server/thread-session";
 import {
+  activeThreadAfterArchive,
+  setThreadPinned,
+} from "./app-server/thread-metadata";
+import {
   ConversationPage,
   type ConversationLoadState,
 } from "./features/conversation/ConversationPage";
@@ -29,6 +36,7 @@ import {
   type ComposerPicker,
 } from "./features/settings/ComposerSettings";
 import {
+  AppIcon,
   titleOf,
   type ConnectionState,
   type ThreadListState,
@@ -58,7 +66,7 @@ import {
   saveBackendRegistry,
 } from "./backends/registry";
 import { BackendConnectionManager } from "./backends/connection-manager";
-import { fetchBackendHostInfo } from "./backends/probe";
+import { fetchBackendHostInfo, fetchBackendProjects } from "./backends/probe";
 import type {
   BackendConfig,
   BackendRegistry,
@@ -66,37 +74,84 @@ import type {
 } from "./backends/types";
 import { BackendManagerSheet } from "./features/backends/BackendManagerSheet";
 import { BackendAttentionBanner } from "./features/backends/BackendAttentionBanner";
+import {
+  aggregateThreads,
+  filterAggregatedThreads,
+  type AggregatedThreadItem,
+} from "./features/threads/thread-list-model";
+import {
+  projectCollapseKey,
+  readCollapsedProjectKeys,
+  writeCollapsedProjectKeys,
+} from "./features/threads/project-collapse";
+import {
+  readUnreadThreadIds,
+  shouldMarkThreadUnread,
+  writeUnreadThreadIds,
+} from "./features/threads/thread-unread";
 
 type AnyRecord = Record<string, any>;
 
+interface BackendThreadSnapshot {
+  backendId: string;
+  threads: AnyRecord[];
+  projects: string[];
+  projectThreadStates: Record<string, ProjectThreadLoadState>;
+  loadingProjectCwd: string;
+  threadListState: ThreadListState;
+  openingThreadId: string;
+  error: string;
+}
+
+interface WorkspaceCommand {
+  id: number;
+  backendId: string;
+  type: "new" | "open" | "load-project" | "retry-project";
+  thread?: AnyRecord;
+  cwd?: string | null;
+  draft?: string;
+  draftImages?: DraftImage[];
+}
+
 interface BackendWorkspaceProps {
   backend: BackendConfig;
-  visible: boolean;
+  conversationVisible: boolean;
   backends: BackendConfig[];
   summaries: Record<string, BackendRuntimeSummary>;
-  onSelectBackend: (backendId: string) => void;
-  onManageBackends: () => void;
   onSummaryChange: (summary: BackendRuntimeSummary) => void;
+  onSnapshotChange: (snapshot: BackendThreadSnapshot) => void;
+  onOpenSidebar: () => void;
+  onSwitchNewChatBackend: (
+    backendId: string,
+    draft: string,
+    draftImages: DraftImage[],
+  ) => void;
+  command: WorkspaceCommand | null;
+  refreshVersion: number;
 }
 
 function BackendWorkspace({
   backend,
-  visible,
+  conversationVisible,
   backends,
   summaries,
-  onSelectBackend,
-  onManageBackends,
   onSummaryChange,
+  onSnapshotChange,
+  onOpenSidebar,
+  onSwitchNewChatBackend,
+  command,
+  refreshVersion,
 }: BackendWorkspaceProps) {
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [threads, setThreads] = useState<AnyRecord[]>([]);
+  const [projects, setProjects] = useState<string[]>([]);
+  const [projectThreadStates, setProjectThreadStates] = useState<
+    Record<string, ProjectThreadLoadState>
+  >({});
+  const [loadingProjectCwd, setLoadingProjectCwd] = useState("");
   const [threadListState, setThreadListState] =
     useState<ThreadListState>("loading");
   const [active, setActive] = useState<AnyRecord | null>(null);
-  const [query, setQuery] = useState("");
-  const [listNow, setListNow] = useState(() =>
-    Math.floor(Date.now() / 1000),
-  );
   const [draft, setDraft] = useState("");
   const [draftImages, setDraftImages] = useState<DraftImage[]>([]);
   const [imageReading, setImageReading] = useState(false);
@@ -120,21 +175,123 @@ function BackendWorkspace({
   const [conversationLoadState, setConversationLoadState] =
     useState<ConversationLoadState>("idle");
   const [conversationLoadError, setConversationLoadError] = useState("");
+  const [tokenUsageByThread, setTokenUsageByThread] = useState<
+    Record<string, AnyRecord>
+  >({});
+  const [rateLimits, setRateLimits] = useState<AnyRecord | null>(null);
+  const [pendingAction, setPendingAction] = useState("");
+  const [notice, setNotice] = useState("");
   const [picker, setPicker] = useState<ComposerPicker>(null);
   const clientRef = useRef<AppServerClient | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const imageReadGenerationRef = useRef(new ImageReadGeneration());
   const draftContextGenerationRef = useRef(0);
   const activeRef = useRef<AnyRecord | null>(null);
+  const conversationVisibleRef = useRef(conversationVisible);
   const activeThreadTargetRef = useRef<string | null>(null);
   const openSequenceRef = useRef(0);
+  const fullyLoadedProjectCwdsRef = useRef(new Set<string>());
+  const localPinnedKey = `codex-mobile:pinned:${backend.id}`;
+  const readLocalPinned = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(localPinnedKey) || "[]");
+      return new Set(Array.isArray(value) ? value.map(String) : []);
+    } catch {
+      return new Set<string>();
+    }
+  };
+  const writeLocalPinned = (ids: Set<string>) => {
+    localStorage.setItem(localPinnedKey, JSON.stringify([...ids]));
+  };
+  const readLocalUnread = () =>
+    readUnreadThreadIds(localStorage, backend.id);
+  const writeLocalUnread = (ids: Set<string>) => {
+    writeUnreadThreadIds(localStorage, backend.id, ids);
+  };
+  const markThreadRead = (threadId: string) => {
+    const unread = readLocalUnread();
+    if (!unread.delete(threadId)) return;
+    writeLocalUnread(unread);
+    setThreads((current) =>
+      current.map((thread) =>
+        String(thread.id) === threadId
+          ? { ...thread, isUnread: false }
+          : thread,
+      ),
+    );
+  };
+  const markThreadUnread = (threadId: string) => {
+    const unread = readLocalUnread();
+    unread.add(threadId);
+    writeLocalUnread(unread);
+    setThreads((current) =>
+      current.map((thread) =>
+        String(thread.id) === threadId
+          ? { ...thread, isUnread: true }
+          : thread,
+      ),
+    );
+  };
   const threadListLoaderRef = useRef<ReturnType<
     typeof createLatestThreadListLoader
   > | null>(null);
   if (!threadListLoaderRef.current) {
-    threadListLoaderRef.current = createLatestThreadListLoader((data) => {
-      setThreads(data);
-      setThreadListState("ready");
+    const decorateThreads = (data: AnyRecord[]): AnyRecord[] => {
+      const localPinned = readLocalPinned();
+      const localUnread = readLocalUnread();
+      return data.map((thread) => ({
+        ...thread,
+        isPinned: thread.isPinned === true || localPinned.has(String(thread.id)),
+        isUnread: localUnread.has(String(thread.id)),
+      }));
+    };
+    threadListLoaderRef.current = createLatestThreadListLoader({
+      onData(data) {
+        setThreads(decorateThreads(data));
+        setThreadListState("ready");
+      },
+      onProjectStart(cwd) {
+        setProjectThreadStates((current) => ({
+          ...current,
+          [cwd]: "loading",
+        }));
+      },
+      onProjectData(cwd, data) {
+        const nextProjectThreads = decorateThreads(data);
+        setThreads((current) => {
+          const currentProjectThreads = current.filter(
+            (thread) => thread.cwd === cwd,
+          );
+          const retainedExpandedThreads =
+            fullyLoadedProjectCwdsRef.current.has(cwd)
+              ? currentProjectThreads.filter(
+                  (thread) =>
+                    !nextProjectThreads.some(
+                      (next) => String(next.id) === String(thread.id),
+                    ),
+                )
+              : [];
+          return [
+            ...current.filter((thread) => thread.cwd !== cwd),
+            ...nextProjectThreads,
+            ...retainedExpandedThreads,
+          ];
+        });
+        setProjectThreadStates((current) => ({
+          ...current,
+          [cwd]: "ready",
+        }));
+        setThreadListState("ready");
+      },
+      onProjectError(cwd) {
+        setProjectThreadStates((current) => ({
+          ...current,
+          [cwd]: "error",
+        }));
+      },
+      onSettled() {
+        setThreadListState("ready");
+      },
     });
   }
 
@@ -142,10 +299,23 @@ function BackendWorkspace({
     activeRef.current = active;
   }, [active]);
 
+  useEffect(() => {
+    conversationVisibleRef.current = conversationVisible;
+  }, [conversationVisible]);
+
   async function loadThreads(client = clientRef.current) {
     if (!client || client !== clientRef.current) return;
     try {
-      await threadListLoaderRef.current!.load(client);
+      let directories: string[] = [];
+      try {
+        directories = await fetchBackendProjects(backend);
+        setProjects(directories);
+        if (directories.length) setThreadListState("ready");
+      } catch {
+        directories = projects;
+        if (directories.length) setThreadListState("ready");
+      }
+      await threadListLoaderRef.current!.load(client, directories);
     } catch (reason) {
       setThreadListState((current) =>
         current === "loading" ? "error" : current,
@@ -153,27 +323,6 @@ function BackendWorkspace({
       throw reason;
     }
   }
-
-  useEffect(() => {
-    if (!visible) return;
-    let cancelled = false;
-    const scrollToPageTarget = () => {
-      if (cancelled) return;
-      window.scrollTo({
-        top: active?.id ? document.documentElement.scrollHeight : 0,
-        behavior: "auto",
-      });
-    };
-    const frame = window.requestAnimationFrame(scrollToPageTarget);
-    const settle = active?.id
-      ? window.setTimeout(scrollToPageTarget, 240)
-      : undefined;
-    return () => {
-      cancelled = true;
-      window.cancelAnimationFrame(frame);
-      if (settle != null) window.clearTimeout(settle);
-    };
-  }, [active?.id, conversationLoadState, visible]);
 
   useEffect(() => {
     const hasRunningThread = threads.some((thread) =>
@@ -197,8 +346,37 @@ function BackendWorkspace({
   ]);
 
   useEffect(() => {
+    onSnapshotChange({
+      backendId: backend.id,
+      threads,
+      projects,
+      projectThreadStates,
+      loadingProjectCwd,
+      threadListState,
+      openingThreadId,
+      error,
+    });
+  }, [
+    backend.id,
+    error,
+    onSnapshotChange,
+    openingThreadId,
+    threadListState,
+    threads,
+    projects,
+    projectThreadStates,
+    loadingProjectCwd,
+  ]);
+
+  useEffect(() => {
+    if (!refreshVersion) return;
+    fullyLoadedProjectCwdsRef.current.clear();
+    setThreadListState((current) => (projects.length ? current : "loading"));
+    void loadThreads().catch(() => undefined);
+  }, [refreshVersion]);
+
+  useEffect(() => {
     const refresh = window.setInterval(() => {
-      setListNow(Math.floor(Date.now() / 1000));
       void loadThreads().catch(() => undefined);
     }, 60_000);
     return () => window.clearInterval(refresh);
@@ -259,6 +437,28 @@ function BackendWorkspace({
               return started;
             });
           }
+          if (
+            message.method === "thread/tokenUsage/updated" &&
+            params.threadId &&
+            params.tokenUsage
+          ) {
+            setTokenUsageByThread((current) => ({
+              ...current,
+              [params.threadId]: params.tokenUsage,
+            }));
+          }
+          if (
+            message.method === "account/rateLimits/updated" &&
+            params.rateLimits
+          ) {
+            setRateLimits((current) => ({
+              ...(current ?? {}),
+              rateLimits: {
+                ...(current?.rateLimits ?? {}),
+                ...params.rateLimits,
+              },
+            }));
+          }
           if (message.method === "item/agentMessage/delta" && params.delta) {
             setActive((current) => {
               if (!current || current.id !== params.threadId) return current;
@@ -318,9 +518,23 @@ function BackendWorkspace({
           }
           if (message.method === "turn/completed") {
             if (params.threadId) {
+              const threadId = String(params.threadId);
+              if (
+                shouldMarkThreadUnread({
+                  threadId,
+                  activeThreadId: String(activeRef.current?.id ?? ""),
+                  conversationVisible: conversationVisibleRef.current,
+                  documentVisible:
+                    document.visibilityState === "visible",
+                })
+              ) {
+                markThreadUnread(threadId);
+              } else {
+                markThreadRead(threadId);
+              }
               setThreads((current) =>
                 current.map((thread) =>
-                  thread.id === params.threadId
+                  String(thread.id) === threadId
                     ? { ...thread, status: { type: "idle" } }
                     : thread,
                 ),
@@ -397,7 +611,12 @@ function BackendWorkspace({
         void (async () => {
           try {
             if (!disposed && manager.client(backend.id) === source) {
-            const [modelResult, permissionResult, configResult] = await Promise.all([
+            const [
+              modelResult,
+              permissionResult,
+              configResult,
+              rateLimitResult,
+            ] = await Promise.all([
               client.request<{ data: AnyRecord[] }>("model/list", {
                 limit: 100,
                 includeHidden: false,
@@ -412,6 +631,9 @@ function BackendWorkspace({
                   includeLayers: false,
                 })
                 .catch(() => ({ config: {} })),
+              client
+                .request<AnyRecord>("account/rateLimits/read", undefined)
+                .catch(() => null),
             ]);
             if (disposed || manager.client(backend.id) !== source) return;
             const availableProfiles = permissionResult.data.filter(
@@ -445,6 +667,7 @@ function BackendWorkspace({
               availableProfiles[0]?.id ||
               "";
             setModels(modelResult.data);
+            setRateLimits(rateLimitResult);
             setPermissionProfiles(availableProfiles);
             setSelectedModel((current) => current || configuredModel);
             setSelectedEffort((current) => current ?? normalized.effort);
@@ -479,7 +702,13 @@ function BackendWorkspace({
                   resumed.reasoningEffort,
                   resumed.serviceTier,
                 );
-                setActive(resumed.thread);
+                const localPinned = readLocalPinned();
+                setActive({
+                  ...resumed.thread,
+                  isPinned:
+                    resumed.thread.isPinned === true ||
+                    localPinned.has(String(resumed.thread.id)),
+                });
                 setConversationLoadState("ready");
                 setConversationLoadError("");
                 setActiveSettingsSynchronized(resumed.settingsSynchronized);
@@ -524,11 +753,6 @@ function BackendWorkspace({
     };
   }, [backend.baseUrl, backend.id, backend.token]);
 
-  const visibleThreads = useMemo(
-    () => threads.filter((thread) => titleOf(thread).toLowerCase().includes(query.toLowerCase())),
-    [query, threads],
-  );
-
   function invalidateImageReads() {
     imageReadGenerationRef.current.invalidate();
     setImageReading(false);
@@ -561,7 +785,13 @@ function BackendWorkspace({
         session.reasoningEffort,
         session.serviceTier,
       );
-      setActive(session.thread);
+      const localPinned = readLocalPinned();
+      setActive({
+        ...session.thread,
+        isPinned:
+          session.thread.isPinned === true ||
+          localPinned.has(String(session.thread.id)),
+      });
       setActiveSettingsSynchronized(session.settingsSynchronized);
       setSelectedModel(session.model ?? "");
       setSelectedEffort(resumedSettings.effort);
@@ -606,8 +836,25 @@ function BackendWorkspace({
     }
   }
 
+  const projectOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const options: Array<{ cwd: string; name: string }> = [];
+    for (const thread of threads) {
+      const cwd =
+        typeof thread.cwd === "string" ? thread.cwd.trim() : "";
+      if (!cwd || seen.has(cwd)) continue;
+      seen.add(cwd);
+      options.push({
+        cwd,
+        name: cwd.replace(/\/+$/, "").split("/").filter(Boolean).at(-1) || cwd,
+      });
+    }
+    return options;
+  }, [threads]);
+
   function openThread(thread: AnyRecord) {
     const sequence = ++openSequenceRef.current;
+    markThreadRead(String(thread.id));
     resetDraftContext();
     setDraft("");
     setDraftImages([]);
@@ -666,7 +913,7 @@ function BackendWorkspace({
           approvalsReviewer?: ApprovalsReviewer;
           activePermissionProfile?: { id: string } | null;
         }>("thread/start", {
-          cwd: null,
+          cwd: thread?.cwd ?? null,
           ...(selectedModel ? { model: selectedModel } : {}),
           ...(selectedServiceTier ? { serviceTier: selectedServiceTier } : {}),
           ...(selectedPermission ? { permissions: selectedPermission } : {}),
@@ -809,6 +1056,135 @@ function BackendWorkspace({
     await clientRef.current?.request("turn/interrupt", { threadId: active!.id, turnId: turn.id });
   }
 
+  function showNotice(message: string) {
+    setNotice(message);
+    window.setTimeout(
+      () => setNotice((current) => (current === message ? "" : current)),
+      1800,
+    );
+  }
+
+  async function togglePinned() {
+    const client = clientRef.current;
+    const thread = activeRef.current;
+    if (!client || !thread?.id || pendingAction) return false;
+    const nextPinned = thread.isPinned !== true;
+    setPendingAction("pin");
+    setError("");
+    try {
+      // Apply locally first so pinning remains usable with older CLI versions
+      // that do not implement thread/metadata/update.
+      const localPinned = readLocalPinned();
+      if (nextPinned) localPinned.add(String(thread.id));
+      else localPinned.delete(String(thread.id));
+      writeLocalPinned(localPinned);
+      let refreshed: AnyRecord | null;
+      try {
+        refreshed = await setThreadPinned(client, thread.id, nextPinned);
+      } catch {
+        // Server persistence is best effort; the local state above is the
+        // source of truth when the connected CLI rejects or lacks the RPC.
+        refreshed = { ...thread, isPinned: nextPinned };
+      }
+      const persistedPinned =
+        typeof refreshed.isPinned === "boolean"
+          ? refreshed.isPinned
+          : nextPinned;
+      setThreads((current) =>
+        current.map((entry) =>
+          entry.id === thread.id
+            ? { ...entry, isPinned: persistedPinned }
+            : entry,
+        ),
+      );
+      setActive((current) =>
+        current?.id === thread.id
+          ? { ...current, isPinned: persistedPinned }
+          : current,
+      );
+      showNotice(persistedPinned ? "已置顶" : "已取消置顶");
+      return true;
+    } catch (reason) {
+      setError(
+        reason instanceof Error && reason.message.includes("不支持持久化置顶")
+          ? reason.message
+          : nextPinned
+            ? "置顶失败，请重试"
+            : "取消置顶失败，请重试",
+      );
+      return false;
+    } finally {
+      setPendingAction("");
+    }
+  }
+
+  async function renameThread() {
+    const client = clientRef.current;
+    const thread = activeRef.current;
+    if (!client || !thread?.id || pendingAction) return false;
+    const name = window.prompt("输入新的会话名称", titleOf(thread))?.trim();
+    if (!name || name === titleOf(thread)) return false;
+    setPendingAction("rename");
+    setError("");
+    try {
+      await client.request("thread/name/set", {
+        threadId: thread.id,
+        name,
+      });
+      setThreads((current) =>
+        current.map((entry) =>
+          entry.id === thread.id ? { ...entry, name } : entry,
+        ),
+      );
+      setActive((current) =>
+        current?.id === thread.id ? { ...current, name } : current,
+      );
+      showNotice("已重命名");
+      return true;
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "重命名失败，请重试",
+      );
+      return false;
+    } finally {
+      setPendingAction("");
+    }
+  }
+
+  async function archiveThread() {
+    const client = clientRef.current;
+    const thread = activeRef.current;
+    if (!client || !thread?.id || pendingAction) return false;
+    setPendingAction("archive");
+    setError("");
+    try {
+      await client.request("thread/archive", { threadId: thread.id });
+      markThreadRead(String(thread.id));
+      setThreads((current) =>
+        current.filter((entry) => entry.id !== thread.id),
+      );
+      const archivedThreadStillOpen =
+        activeThreadTargetRef.current === thread.id;
+      setActive((current) =>
+        activeThreadAfterArchive(current, thread.id),
+      );
+      if (archivedThreadStillOpen) {
+        activeThreadTargetRef.current = null;
+        setConversationLoadState("idle");
+        onOpenSidebar();
+      }
+      showNotice("已归档");
+      return true;
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "归档失败，请重试",
+      );
+      return false;
+    } finally {
+      setPendingAction("");
+    }
+  }
+
   const selectedModelEntry =
     models.find((model) => model.model === selectedModel) ?? null;
   const selectedModelLabel =
@@ -893,44 +1269,113 @@ function BackendWorkspace({
     setRequests((current) => current.slice(1));
   };
 
-  const leaveConversation = () => {
-    if (!active) return;
-    openSequenceRef.current += 1;
-    activeThreadTargetRef.current = null;
-    resetDraftContext();
-    const threadId = active.id;
-    setOpeningThreadId("");
-    setDraft("");
-    setDraftImages([]);
-    setConversationLoadState("idle");
-    setConversationLoadError("");
-    setActive(null);
-    setBusy(false);
-    if (threadId && !busy) {
-      void clientRef.current
-        ?.request("thread/unsubscribe", { threadId })
-        .catch(() => undefined);
-    }
-  };
-
-  const startNewChat = () => {
+  const startNewChat = (
+    cwd: string | null = null,
+    nextDraft = "",
+    nextDraftImages: DraftImage[] = [],
+  ) => {
+    const savedCwd = window.localStorage.getItem(
+      `codex-mobile:new-chat-project:${backend.id}`,
+    );
+    const selectedCwd =
+      cwd ||
+      projectOptions.find((project) => project.cwd === savedCwd)?.cwd ||
+      projectOptions[0]?.cwd ||
+      null;
     openSequenceRef.current += 1;
     activeThreadTargetRef.current = null;
     resetDraftContext();
     setOpeningThreadId("");
-    setDraft("");
-    setDraftImages([]);
+    setDraft(nextDraft);
+    setDraftImages(nextDraftImages);
     setConversationLoadState("ready");
     setConversationLoadError("");
     setActiveSettingsSynchronized(true);
-    setActive({ id: "", turns: [], preview: "新对话" });
+    setActive({
+      id: "",
+      turns: [],
+      preview: "新对话",
+      cwd: selectedCwd,
+    });
   };
+
+  const chooseNewChatProject = (cwd: string) => {
+    window.localStorage.setItem(
+      `codex-mobile:new-chat-project:${backend.id}`,
+      cwd,
+    );
+    setActive((current) =>
+      current && !current.id ? { ...current, cwd } : current,
+    );
+  };
+
+  async function loadAllProjectThreads(cwd: string) {
+    const client = clientRef.current;
+    if (!client) return;
+    setLoadingProjectCwd(cwd);
+    try {
+      const all: AnyRecord[] = [];
+      let cursor: string | null = null;
+      do {
+        const result: { data: AnyRecord[]; nextCursor?: string | null } =
+          await client.request("thread/list", {
+            limit: 50,
+            cwd,
+            sortKey: "updated_at",
+            ...(cursor ? { cursor } : {}),
+          });
+        all.push(...result.data);
+        cursor = result.nextCursor ?? null;
+      } while (cursor);
+      fullyLoadedProjectCwdsRef.current.add(cwd);
+      setThreads((current) => [
+        ...current.filter((thread) => thread.cwd !== cwd),
+        ...all,
+      ]);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setLoadingProjectCwd((current) => (current === cwd ? "" : current));
+    }
+  }
+
+  const handledCommandRef = useRef(0);
+  useEffect(() => {
+    if (
+      !command ||
+      command.backendId !== backend.id ||
+      command.id === handledCommandRef.current
+    ) {
+      return;
+    }
+    handledCommandRef.current = command.id;
+    if (command.type === "open" && command.thread) {
+      openThread(command.thread);
+    } else if (command.type === "new") {
+      startNewChat(
+        command.cwd ?? null,
+        command.draft ?? "",
+        command.draftImages ?? [],
+      );
+    } else if (command.type === "load-project" && command.cwd) {
+      void loadAllProjectThreads(command.cwd);
+    } else if (command.type === "retry-project" && command.cwd) {
+      const client = clientRef.current;
+      if (client) {
+        void threadListLoaderRef.current!.loadProject(client, command.cwd);
+      }
+    }
+  }, [backend.id, command, projectOptions]);
 
   return (
     <main className="app-shell">
       {active ? (
         <ConversationPage
           active={active}
+          backendId={backend.id}
+          backendName={backend.name}
+          backends={backends.filter((entry) => entry.enabled)}
+          projectOptions={projectOptions}
           loadState={conversationLoadState}
           loadError={conversationLoadError}
           connection={connection}
@@ -940,12 +1385,22 @@ function BackendWorkspace({
           draftImages={draftImages}
           imageReading={imageReading}
           busy={busy}
+          tokenUsage={tokenUsageByThread[active.id] ?? null}
+          rateLimits={rateLimits}
+          pendingAction={pendingAction}
           selectedServiceTier={selectedServiceTier}
           selectedModelLabel={selectedModelLabel}
           selectedEffort={selectedEffort}
           selectedPermissionLabel={selectedPermissionLabel}
           imageInputRef={imageInputRef}
-          onBack={leaveConversation}
+          onBack={onOpenSidebar}
+          onNewChatBackendChange={(backendId) =>
+            onSwitchNewChatBackend(backendId, draft, draftImages)
+          }
+          onNewChatProjectChange={chooseNewChatProject}
+          onPin={togglePinned}
+          onRename={renameThread}
+          onArchive={archiveThread}
           onRetry={retryThreadDetail}
           onSubmit={send}
           onRemoveImage={(imageId) =>
@@ -960,25 +1415,30 @@ function BackendWorkspace({
           onInterrupt={interrupt}
         />
       ) : (
-        <ThreadListPage
-          connection={connection}
-          hostname={new URL(backend.baseUrl).hostname}
-          backends={backends}
-          summaries={summaries}
-          selectedBackendId={backend.id}
-          threadListState={threadListState}
-          visibleThreads={visibleThreads}
-          totalThreadCount={threads.length}
-          openingThreadId={openingThreadId}
-          query={query}
-          listNow={listNow}
-          error={error}
-          onQueryChange={setQuery}
-          onOpenThread={openThread}
-          onNewChat={startNewChat}
-          onSelectBackend={onSelectBackend}
-          onManageBackends={onManageBackends}
-        />
+        <section className="conversation conversation-empty">
+          <header className="conversation-header">
+            <button
+              className="round-button"
+              aria-label="打开会话列表"
+              onClick={onOpenSidebar}
+            >
+              <AppIcon name="menu" />
+            </button>
+            <div className="thread-heading">
+              <strong>Codex Mobile</strong>
+              <span>
+                <i className={`status-dot ${connection}`} />
+                {backend.name}
+              </span>
+            </div>
+          </header>
+          <div className="empty-state">从会话列表选择对话</div>
+        </section>
+      )}
+      {notice && (
+        <div className="notice-banner" role="status">
+          {notice}
+        </div>
       )}
       <ApprovalSheet
         approval={approval}
@@ -1029,6 +1489,35 @@ export function App() {
     Record<string, BackendRuntimeSummary>
   >({});
   const [managerOpen, setManagerOpen] = useState(false);
+  const [snapshots, setSnapshots] = useState<
+    Record<string, BackendThreadSnapshot>
+  >({});
+  const [listBackendId, setListBackendId] = useState(
+    () =>
+      window.localStorage.getItem("codex-mobile:list-backend") || "all",
+  );
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [query, setQuery] = useState("");
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [projectVisibleCounts, setProjectVisibleCounts] = useState<
+    Record<string, number>
+  >({});
+  const [collapsedProjectKeys, setCollapsedProjectKeys] = useState(() =>
+    readCollapsedProjectKeys(window.localStorage),
+  );
+  const loadedProjectsRef = useRef(new Set<string>());
+  const [listNow, setListNow] = useState(() =>
+    Math.floor(Date.now() / 1000),
+  );
+  const [command, setCommand] = useState<WorkspaceCommand | null>(null);
+  const commandIdRef = useRef(0);
+  const edgeTouchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const openSidebar = useCallback(() => setSidebarOpen(true), []);
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+  const selectListBackend = useCallback((backendId: string) => {
+    window.localStorage.setItem("codex-mobile:list-backend", backendId);
+    setListBackendId(backendId);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1065,16 +1554,91 @@ export function App() {
     };
   }, [registry.backends]);
 
-  const enabledBackends = registry.backends.filter(
-    (backend) => backend.enabled,
+  useEffect(() => {
+    if (
+      sidebarOpen &&
+      !(window.history.state as AnyRecord | null)?.codexMobileSidebar
+    ) {
+      window.history.pushState(
+        {
+          ...(window.history.state ?? {}),
+          codexMobileSidebar: true,
+        },
+        "",
+      );
+    }
+  }, [sidebarOpen]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (sidebarOpen) setSidebarOpen(false);
+    };
+    const handleTouchStart = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      edgeTouchStartRef.current =
+        !sidebarOpen && touch && touch.clientX <= 24
+          ? { x: touch.clientX, y: touch.clientY }
+          : null;
+    };
+    const handleTouchMove = (event: TouchEvent) => {
+      const start = edgeTouchStartRef.current;
+      const touch = event.touches[0];
+      if (!start || !touch) return;
+      if (Math.abs(touch.clientY - start.y) > 44) {
+        edgeTouchStartRef.current = null;
+        return;
+      }
+      if (touch.clientX - start.x < 56) return;
+      edgeTouchStartRef.current = null;
+      openSidebar();
+    };
+    const handleTouchEnd = () => {
+      edgeTouchStartRef.current = null;
+    };
+    window.addEventListener("popstate", handlePopState);
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchmove", handleTouchMove, { passive: true });
+    window.addEventListener("touchend", handleTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, [openSidebar, sidebarOpen]);
+
+  useEffect(() => {
+    const timer = window.setInterval(
+      () => setListNow(Math.floor(Date.now() / 1000)),
+      60_000,
+    );
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const enabledBackends = useMemo(
+    () => registry.backends.filter((backend) => backend.enabled),
+    [registry.backends],
   );
-  const mountedBackends = enabledBackends.length
-    ? enabledBackends
-    : registry.backends.slice(0, 1);
+  const mountedBackends = useMemo(
+    () =>
+      enabledBackends.length
+        ? enabledBackends
+        : registry.backends.slice(0, 1),
+    [enabledBackends, registry.backends],
+  );
   const selectedBackend =
     mountedBackends.find(
       (backend) => backend.id === registry.selectedBackendId,
     ) ?? mountedBackends[0];
+
+  useEffect(() => {
+    if (
+      listBackendId !== "all" &&
+      !mountedBackends.some((backend) => backend.id === listBackendId)
+    ) {
+      selectListBackend("all");
+    }
+  }, [listBackendId, mountedBackends, selectListBackend]);
 
   const persistRegistry = useCallback((next: BackendRegistry) => {
     saveBackendRegistry(window.localStorage, next);
@@ -1111,6 +1675,220 @@ export function App() {
     });
   }, []);
 
+  const updateSnapshot = useCallback((snapshot: BackendThreadSnapshot) => {
+    setSnapshots((current) => {
+      const previous = current[snapshot.backendId];
+      if (
+        previous &&
+        previous.threads === snapshot.threads &&
+        previous.projects === snapshot.projects &&
+        previous.projectThreadStates === snapshot.projectThreadStates &&
+        previous.loadingProjectCwd === snapshot.loadingProjectCwd &&
+        previous.threadListState === snapshot.threadListState &&
+        previous.openingThreadId === snapshot.openingThreadId &&
+        previous.error === snapshot.error
+      ) {
+        return current;
+      }
+      return { ...current, [snapshot.backendId]: snapshot };
+    });
+  }, []);
+
+  const aggregatedThreads = useMemo(
+    () =>
+      aggregateThreads(
+        mountedBackends,
+        Object.fromEntries(
+          mountedBackends.map((backend) => [
+            backend.id,
+            snapshots[backend.id]?.threads ?? [],
+          ]),
+        ),
+      ),
+    [mountedBackends, snapshots],
+  );
+  const scopedThreads = useMemo(
+    () =>
+      filterAggregatedThreads(
+        listBackendId === "all"
+          ? aggregatedThreads
+          : aggregatedThreads.filter(
+              (thread) => thread.backendId === listBackendId,
+            ),
+        query,
+        listBackendId === "all",
+      ),
+    [aggregatedThreads, listBackendId, query],
+  );
+  const scopedSnapshots =
+    listBackendId === "all"
+      ? mountedBackends.map((backend) => snapshots[backend.id]).filter(Boolean)
+      : [snapshots[listBackendId]].filter(Boolean);
+  const scopedThreadCount =
+    listBackendId === "all"
+      ? aggregatedThreads.length
+      : aggregatedThreads.filter(
+          (thread) => thread.backendId === listBackendId,
+        ).length;
+  const threadListState: ThreadListState = scopedSnapshots.some(
+    (snapshot) => snapshot.threadListState === "ready",
+  )
+    ? "ready"
+    : scopedSnapshots.length &&
+        scopedSnapshots.every(
+          (snapshot) => snapshot.threadListState === "error",
+        )
+      ? "error"
+      : "loading";
+  const listError = scopedSnapshots
+    .map((snapshot) => snapshot.error)
+    .filter(Boolean)
+    .join("；");
+  const openingThreadId =
+    scopedSnapshots
+      .filter((snapshot) => snapshot.openingThreadId)
+      .map(
+        (snapshot) =>
+          `${snapshot.backendId}:${snapshot.openingThreadId}`,
+      )[0] ?? "";
+  const projectDirectories =
+    listBackendId === "all" ? [] : snapshots[listBackendId]?.projects ?? [];
+  const projectThreadStates =
+    listBackendId === "all"
+      ? {}
+      : snapshots[listBackendId]?.projectThreadStates ?? {};
+  const loadingBackendIds = new Set(
+    Object.values(snapshots)
+      .filter((snapshot) =>
+        Object.values(snapshot.projectThreadStates ?? {}).some(
+          (state) => state === "loading",
+        ),
+      )
+      .map((snapshot) => snapshot.backendId),
+  );
+  const loadingProjectKeys = new Set(
+    Object.values(snapshots)
+      .filter((snapshot) => snapshot.loadingProjectCwd)
+      .map(
+        (snapshot) =>
+          `${snapshot.backendId}:${snapshot.loadingProjectCwd}`,
+      ),
+  );
+
+  const toggleProject = useCallback(
+    (backendId: string, cwd: string) => {
+      const key = `${backendId}:${cwd}`;
+      setProjectVisibleCounts((current) => ({
+        ...current,
+        [key]: (current[key] ?? 5) + 10,
+      }));
+      if (!loadedProjectsRef.current.has(key)) {
+        loadedProjectsRef.current.add(key);
+        setCommand({
+          id: ++commandIdRef.current,
+          backendId,
+          type: "load-project",
+          cwd,
+        });
+      }
+    },
+    [],
+  );
+
+  const toggleProjectCollapsed = useCallback(
+    (backendId: string, cwd: string) => {
+      const key = projectCollapseKey(backendId, cwd);
+      setCollapsedProjectKeys((current) => {
+        const next = new Set(current);
+        if (next.has(key)) {
+          next.delete(key);
+        } else {
+          next.add(key);
+        }
+        writeCollapsedProjectKeys(window.localStorage, next);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const retryProject = useCallback((backendId: string, cwd: string) => {
+    setCommand({
+      id: ++commandIdRef.current,
+      backendId,
+      type: "retry-project",
+      cwd,
+    });
+  }, []);
+
+  const openThread = useCallback(
+    (item: AggregatedThreadItem) => {
+      selectBackend(item.backendId);
+      setCommand({
+        id: ++commandIdRef.current,
+        backendId: item.backendId,
+        type: "open",
+        thread: item.thread,
+      });
+      closeSidebar();
+    },
+    [closeSidebar, selectBackend],
+  );
+
+  const startNewChat = useCallback(() => {
+    const savedBackendId = window.localStorage.getItem(
+      "codex-mobile:new-chat-backend",
+    );
+    const backendId =
+      listBackendId === "all"
+        ? mountedBackends.find(
+            (backend) => backend.id === savedBackendId,
+          )?.id ??
+          selectedBackend?.id ??
+          mountedBackends[0]?.id
+        : listBackendId;
+    if (!backendId) return;
+    window.localStorage.setItem("codex-mobile:new-chat-backend", backendId);
+    selectBackend(backendId);
+    setCommand({
+      id: ++commandIdRef.current,
+      backendId,
+      type: "new",
+      cwd: null,
+    });
+    closeSidebar();
+  }, [
+    closeSidebar,
+    listBackendId,
+    mountedBackends,
+    selectBackend,
+    selectedBackend?.id,
+  ]);
+
+  const switchNewChatBackend = useCallback(
+    (
+      backendId: string,
+      currentDraft: string,
+      currentDraftImages: DraftImage[],
+    ) => {
+      const target = mountedBackends.find(
+        (backend) => backend.id === backendId,
+      );
+      if (!target) return;
+      window.localStorage.setItem("codex-mobile:new-chat-backend", backendId);
+      selectBackend(backendId);
+      setCommand({
+        id: ++commandIdRef.current,
+        backendId,
+        type: "new",
+        cwd: null,
+        draft: currentDraft,
+        draftImages: currentDraftImages,
+      });
+    },
+    [mountedBackends, selectBackend],
+  );
+
   if (!selectedBackend) {
     return <main className="app-shell"><div className="empty-state">没有可用设备</div></main>;
   }
@@ -1125,20 +1903,76 @@ export function App() {
         >
           <BackendWorkspace
             backend={backend}
-            visible={backend.id === selectedBackend.id}
+            conversationVisible={
+              backend.id === selectedBackend.id && !sidebarOpen
+            }
             backends={registry.backends}
             summaries={summaries}
-            onSelectBackend={selectBackend}
-            onManageBackends={() => setManagerOpen(true)}
             onSummaryChange={updateSummary}
+            onSnapshotChange={updateSnapshot}
+            onOpenSidebar={openSidebar}
+            onSwitchNewChatBackend={switchNewChatBackend}
+            command={command}
+            refreshVersion={refreshVersion}
           />
         </div>
       ))}
+      <div
+        className={`conversation-sidebar-layer${
+          sidebarOpen ? " open" : ""
+        }`}
+        aria-hidden={!sidebarOpen}
+      >
+        <aside className="conversation-sidebar" aria-label="会话列表">
+          <ThreadListPage
+            backends={registry.backends}
+            summaries={summaries}
+            selectedBackendId={listBackendId}
+            loadingBackendIds={loadingBackendIds}
+            threadListState={threadListState}
+            visibleThreads={scopedThreads}
+            totalThreadCount={scopedThreadCount}
+            projectDirectories={projectDirectories}
+            projectThreadStates={projectThreadStates}
+            projectVisibleCounts={projectVisibleCounts}
+            collapsedProjectKeys={collapsedProjectKeys}
+            loadingProjectKeys={loadingProjectKeys}
+            openingThreadId={openingThreadId}
+            query={query}
+            listNow={listNow}
+            error={listError}
+            onQueryChange={setQuery}
+            onOpenThread={openThread}
+            onNewChat={startNewChat}
+            onSelectBackend={selectListBackend}
+            onManageBackends={() => setManagerOpen(true)}
+            onRefresh={() => {
+              setListNow(Math.floor(Date.now() / 1000));
+              setProjectVisibleCounts({});
+              loadedProjectsRef.current.clear();
+              setRefreshVersion((current) => current + 1);
+            }}
+            onToggleProject={toggleProject}
+            onToggleProjectCollapsed={toggleProjectCollapsed}
+            onRetryProject={retryProject}
+          />
+        </aside>
+        <button
+          className="conversation-sidebar-scrim"
+          type="button"
+          aria-label="关闭会话列表"
+          onClick={closeSidebar}
+        />
+      </div>
       <BackendAttentionBanner
         backends={registry.backends}
         summaries={summaries}
         selectedBackendId={selectedBackend.id}
-        onSelect={selectBackend}
+        onSelect={(backendId) => {
+          selectBackend(backendId);
+          selectListBackend(backendId);
+          openSidebar();
+        }}
       />
       <BackendManagerSheet
         open={managerOpen}

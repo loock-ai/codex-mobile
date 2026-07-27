@@ -1,8 +1,10 @@
 import {
   type FormEvent,
   type RefObject,
+  useState,
 } from "react";
 import { AppServerClient } from "../../app-server/client";
+import type { BackendConfig } from "../../backends/types";
 import {
   MAX_DRAFT_IMAGES,
   MAX_TOTAL_IMAGE_BYTES,
@@ -17,11 +19,21 @@ import {
 import { effortLabel } from "../../ui/settings";
 import { groupConversationTurns } from "../../ui/conversation";
 import { TurnCard } from "./Timeline";
+import {
+  ContextUsageButton,
+  ConversationActionMenu,
+  ConversationStatusSheet,
+} from "./ConversationControls";
+import { useConversationAutoScroll } from "./conversation-scroll";
 
 export type ConversationLoadState = "idle" | "loading" | "ready" | "error";
 
 export function ConversationPage({
   active,
+  backendId,
+  backendName,
+  backends,
+  projectOptions,
   loadState,
   loadError,
   connection,
@@ -31,12 +43,20 @@ export function ConversationPage({
   draftImages,
   imageReading,
   busy,
+  tokenUsage,
+  rateLimits,
+  pendingAction,
   selectedServiceTier,
   selectedModelLabel,
   selectedEffort,
   selectedPermissionLabel,
   imageInputRef,
   onBack,
+  onNewChatBackendChange,
+  onNewChatProjectChange,
+  onPin,
+  onRename,
+  onArchive,
   onRetry,
   onSubmit,
   onRemoveImage,
@@ -47,6 +67,10 @@ export function ConversationPage({
   onInterrupt,
 }: {
   active: DisplayRecord;
+  backendId: string;
+  backendName: string;
+  backends: BackendConfig[];
+  projectOptions: Array<{ cwd: string; name: string }>;
   loadState: ConversationLoadState;
   loadError: string;
   connection: ConnectionState;
@@ -56,12 +80,20 @@ export function ConversationPage({
   draftImages: DraftImage[];
   imageReading: boolean;
   busy: boolean;
+  tokenUsage: Record<string, any> | null;
+  rateLimits: Record<string, any> | null;
+  pendingAction: string;
   selectedServiceTier: string | null;
   selectedModelLabel: string;
   selectedEffort: string | null;
   selectedPermissionLabel: string;
   imageInputRef: RefObject<HTMLInputElement | null>;
   onBack: () => void;
+  onNewChatBackendChange: (backendId: string) => void;
+  onNewChatProjectChange: (cwd: string) => void;
+  onPin: () => Promise<boolean>;
+  onRename: () => Promise<boolean>;
+  onArchive: () => Promise<boolean>;
   onRetry: () => void;
   onSubmit: (event: FormEvent) => void;
   onRemoveImage: (imageId: string) => void;
@@ -71,48 +103,190 @@ export function ConversationPage({
   onDraftChange: (value: string) => void;
   onInterrupt: () => void | Promise<void>;
 }) {
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const turns = groupConversationTurns(active.turns ?? []);
-  const interactive = loadState === "ready";
+  const isNewChat = !active.id;
+  const {
+    scrollRef,
+    contentRef,
+    onScroll,
+    scrollToLatest,
+    showJumpToLatest,
+  } = useConversationAutoScroll({
+    threadId: String(active.id ?? `new:${backendId}`),
+    contentRevision: active.turns,
+    ready: loadState === "ready",
+  });
+  const interactive =
+    loadState === "ready" && (!isNewChat || !!active.cwd);
   return (
     <section className="conversation">
       <header className="conversation-header">
         <button
           className="round-button"
-          aria-label="返回"
+          aria-label="打开会话列表"
           onClick={onBack}
         >
-          <AppIcon name="back" />
+          <AppIcon name="menu" />
         </button>
         <div className="thread-heading">
           <strong>{titleOf(active)}</strong>
-          <span><i className={`status-dot ${connection}`} /> {active.cwd?.split("/").pop() || "Codex"} · {connection === "online" ? "已连接" : "连接中"}</span>
+          <span>
+            <i className={`status-dot ${connection}`} />
+            {backendName} · {active.cwd?.split("/").pop() || "未选择项目"} ·{" "}
+            {connection === "online" ? "已连接" : "连接中"}
+          </span>
         </div>
-        <button className="round-button" aria-label="更多"><AppIcon name="more" /></button>
+        {!!active.id && (
+          <div className="conversation-header-actions">
+            <ContextUsageButton
+              tokenUsage={tokenUsage}
+              onClick={() => {
+                setActionsOpen(false);
+                setStatusOpen(true);
+              }}
+            />
+            <button
+              className="round-button"
+              type="button"
+              aria-label="会话操作"
+              aria-expanded={actionsOpen}
+              onClick={() => {
+                setStatusOpen(false);
+                setActionsOpen((current) => !current);
+              }}
+            >
+              <AppIcon name="more" />
+            </button>
+          </div>
+        )}
       </header>
-      <div className="timeline" aria-busy={loadState === "loading"}>
-        {loadState === "loading" ? (
-          <div
-            className="conversation-skeleton"
-            role="status"
-            aria-label="正在加载会话详情"
-          >
-            {Array.from({ length: 7 }, (_, index) => <i key={index} />)}
+      <ConversationActionMenu
+        open={actionsOpen}
+        thread={active}
+        pendingAction={pendingAction}
+        onClose={() => setActionsOpen(false)}
+        onPin={() => {
+          void onPin().then((completed) => {
+            if (completed) setActionsOpen(false);
+          });
+        }}
+        onCopy={() => {
+          void navigator.clipboard?.writeText(String(active.id));
+          setActionsOpen(false);
+        }}
+        onRename={() => {
+          void onRename().then((completed) => {
+            if (completed) setActionsOpen(false);
+          });
+        }}
+        onArchive={() => {
+          void onArchive().then((completed) => {
+            if (completed) setActionsOpen(false);
+          });
+        }}
+      />
+      <div
+        className="conversation-scroll"
+        ref={scrollRef}
+        onScroll={onScroll}
+      >
+        <div className="conversation-scroll-content" ref={contentRef}>
+          {isNewChat && (
+            <section className="new-chat-targets" aria-label="新聊天目标">
+              <h2>开始处理</h2>
+              <label>
+                <AppIcon name="folder" />
+                <span>
+                  <small>项目</small>
+                  <strong>
+                    {projectOptions.find(
+                      (project) => project.cwd === active.cwd,
+                    )?.name ?? "请选择项目"}
+                  </strong>
+                </span>
+                <select
+                  aria-label="选择项目"
+                  value={active.cwd ?? ""}
+                  disabled={!projectOptions.length}
+                  onChange={(event) =>
+                    onNewChatProjectChange(event.currentTarget.value)
+                  }
+                >
+                  {!projectOptions.length && (
+                    <option value="">没有可用项目</option>
+                  )}
+                  {projectOptions.map((project) => (
+                    <option value={project.cwd} key={project.cwd}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span className="device-glyph" aria-hidden="true">▰</span>
+                <span>
+                  <small>机器</small>
+                  <strong>{backendName}</strong>
+                </span>
+                <select
+                  aria-label="选择机器"
+                  value={backendId}
+                  onChange={(event) =>
+                    onNewChatBackendChange(event.currentTarget.value)
+                  }
+                >
+                  {backends.map((backend) => (
+                    <option value={backend.id} key={backend.id}>
+                      {backend.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {!projectOptions.length && (
+                <p role="alert">没有可用项目，暂时无法启动新聊天。</p>
+              )}
+            </section>
+          )}
+          <div className="timeline" aria-busy={loadState === "loading"}>
+            {loadState === "loading" ? (
+              <div
+                className="conversation-skeleton"
+                role="status"
+                aria-label="正在加载会话详情"
+              >
+                {Array.from({ length: 7 }, (_, index) => <i key={index} />)}
+              </div>
+            ) : loadState === "error" ? (
+              <div className="conversation-load-error" role="alert">
+                <strong>无法加载会话</strong>
+                <p>{loadError || "请检查连接后重试。"}</p>
+                <button type="button" onClick={onRetry}>重试</button>
+              </div>
+            ) : turns.length ? turns.map((turn: DisplayRecord, index: number) => (
+              <TurnCard
+                key={turn.id ?? index}
+                turn={turn}
+                liveDiff={turn.liveDiff}
+                client={client}
+              />
+            )) : !isNewChat && (
+              <div className="empty-state">开始一次新的 Codex 对话</div>
+            )}
           </div>
-        ) : loadState === "error" ? (
-          <div className="conversation-load-error" role="alert">
-            <strong>无法加载会话</strong>
-            <p>{loadError || "请检查连接后重试。"}</p>
-            <button type="button" onClick={onRetry}>重试</button>
-          </div>
-        ) : turns.length ? turns.map((turn: DisplayRecord, index: number) => (
-          <TurnCard
-            key={turn.id ?? index}
-            turn={turn}
-            liveDiff={turn.liveDiff}
-            client={client}
-          />
-        )) : <div className="empty-state">开始一次新的 Codex 对话</div>}
+        </div>
       </div>
+      {showJumpToLatest && (
+        <button
+          type="button"
+          className="jump-to-latest"
+          aria-label="回到最新消息"
+          onClick={scrollToLatest}
+        >
+          ↓
+        </button>
+      )}
       {error && <div className="error-banner" role="alert">{error}</div>}
       <form
         className="composer-wrap"
@@ -212,6 +386,13 @@ export function ConversationPage({
           </button>
         </div>
       </form>
+      <ConversationStatusSheet
+        open={statusOpen}
+        thread={active}
+        tokenUsage={tokenUsage}
+        rateLimits={rateLimits}
+        onClose={() => setStatusOpen(false)}
+      />
     </section>
   );
 }

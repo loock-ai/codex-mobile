@@ -96,6 +96,27 @@ describe("透明网关", () => {
     expect(allowed.status).toBe(200);
   });
 
+  it("项目接口返回 Codex 配置中的目录", async () => {
+    const gateway = await createGateway({
+      host: "127.0.0.1",
+      port: 0,
+      mode: "external",
+      upstreamUrl: "ws://127.0.0.1:9",
+      staticDir: null,
+      accessToken: "project-token",
+      readProjectDirectories: async () => ["/workspace/one", "/workspace/two"],
+    });
+    cleanups.push(async () => gateway.close());
+
+    const response = await fetch(
+      `http://127.0.0.1:${gateway.port}/api/projects?token=project-token`,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      projects: ["/workspace/one", "/workspace/two"],
+    });
+  });
+
   it("设备信息接口返回受控身份和 app-server 就绪状态", async () => {
     const gateway = await createGateway({
       host: "127.0.0.1",

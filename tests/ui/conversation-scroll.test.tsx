@@ -1,0 +1,104 @@
+import { fireEvent, render } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import {
+  isConversationNearBottom,
+  useConversationAutoScroll,
+} from "../../src/features/conversation/conversation-scroll";
+
+function ScrollHarness({
+  revision,
+  threadId = "thread-1",
+}: {
+  revision: number;
+  threadId?: string;
+}) {
+  const {
+    scrollRef,
+    contentRef,
+    onScroll,
+    scrollToLatest,
+    showJumpToLatest,
+  } = useConversationAutoScroll({
+    threadId,
+    contentRevision: revision,
+    ready: true,
+  });
+  return (
+    <>
+      <div data-testid="scroller" ref={scrollRef} onScroll={onScroll}>
+        <div ref={contentRef}>{revision}</div>
+      </div>
+      {showJumpToLatest && (
+        <button onClick={scrollToLatest}>回到最新</button>
+      )}
+    </>
+  );
+}
+
+function setScrollMetrics(
+  element: HTMLElement,
+  {
+    scrollHeight,
+    clientHeight,
+    scrollTop,
+  }: {
+    scrollHeight: number;
+    clientHeight: number;
+    scrollTop: number;
+  },
+) {
+  Object.defineProperties(element, {
+    scrollHeight: { configurable: true, value: scrollHeight },
+    clientHeight: { configurable: true, value: clientHeight },
+    scrollTop: { configurable: true, value: scrollTop, writable: true },
+  });
+}
+
+describe("对话流式滚动跟随", () => {
+  it("使用 80px 阈值判断是否接近底部", () => {
+    expect(
+      isConversationNearBottom({
+        scrollHeight: 500,
+        clientHeight: 200,
+        scrollTop: 220,
+      }),
+    ).toBe(true);
+    expect(
+      isConversationNearBottom({
+        scrollHeight: 500,
+        clientHeight: 200,
+        scrollTop: 100,
+      }),
+    ).toBe(false);
+  });
+
+  it("内容增长时跟随底部，用户上滑后暂停并可恢复", () => {
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+    const { getByTestId, queryByText, getByText, rerender } = render(
+      <ScrollHarness revision={1} />,
+    );
+    const scroller = getByTestId("scroller");
+    setScrollMetrics(scroller, {
+      scrollHeight: 500,
+      clientHeight: 200,
+      scrollTop: 220,
+    });
+
+    rerender(<ScrollHarness revision={2} />);
+    expect(scroller.scrollTop).toBe(500);
+
+    scroller.scrollTop = 100;
+    fireEvent.scroll(scroller);
+    expect(getByText("回到最新")).not.toBeNull();
+
+    rerender(<ScrollHarness revision={3} />);
+    expect(scroller.scrollTop).toBe(100);
+
+    fireEvent.click(getByText("回到最新"));
+    expect(scroller.scrollTop).toBe(500);
+    expect(queryByText("回到最新")).toBeNull();
+  });
+});

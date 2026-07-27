@@ -16,6 +16,7 @@ export interface GatewayOptions {
   gatewayVersion?: string;
   appServerReady?: () => Promise<boolean>;
   allowedOrigins?: string[];
+  readProjectDirectories?: () => Promise<string[]>;
 }
 
 export interface Gateway {
@@ -66,8 +67,11 @@ export async function createGateway(options: GatewayOptions): Promise<Gateway> {
   const server: Server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://gateway.local");
     const origin = request.headers.origin;
-    const controlRequest =
-      url.pathname === "/api/status" || url.pathname === "/api/host";
+    const controlRequest = [
+      "/api/status",
+      "/api/host",
+      "/api/projects",
+    ].includes(url.pathname);
     if (
       controlRequest &&
       !originAllowed(origin, options.allowedOrigins)
@@ -120,6 +124,19 @@ export async function createGateway(options: GatewayOptions): Promise<Gateway> {
     if (url.pathname === "/api/status") {
       response.setHeader("content-type", "application/json; charset=utf-8");
       response.end(JSON.stringify({ mode: options.mode, upstreamUrl: options.upstreamUrl }));
+      return;
+    }
+    if (url.pathname === "/api/projects") {
+      try {
+        const projects = options.readProjectDirectories
+          ? await options.readProjectDirectories()
+          : [];
+        response.setHeader("content-type", "application/json; charset=utf-8");
+        response.end(JSON.stringify({ projects }));
+      } catch {
+        response.statusCode = 500;
+        response.end("无法读取 Codex 本地项目");
+      }
       return;
     }
     if (!options.staticDir) {

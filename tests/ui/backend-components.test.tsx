@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { BackendSwitcher } from "../../src/features/backends/BackendSwitcher";
 import { BackendAttentionBanner } from "../../src/features/backends/BackendAttentionBanner";
@@ -51,10 +57,13 @@ describe("多设备界面", () => {
         summaries={summaries}
         selectedBackendId="mini"
         onSelect={onSelect}
-        onManage={() => undefined}
       />,
     );
 
+    expect(screen.getByRole("button", { name: /全部设备/ })).not.toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "添加或管理设备" }),
+    ).toBeNull();
     expect(
       screen
         .getByRole("button", { name: /Mac mini.*进行中/ })
@@ -62,6 +71,25 @@ describe("多设备界面", () => {
     ).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: /MacBook.*2 个待审批/ }));
     expect(onSelect).toHaveBeenCalledWith("macbook");
+  });
+
+  it("只有一台设备时仍展示全部 Tab", () => {
+    const { container } = render(
+      <BackendSwitcher
+        backends={[mini]}
+        summaries={summaries}
+        selectedBackendId="all"
+        onSelect={() => undefined}
+      />,
+    );
+    const view = within(container);
+
+    expect(
+      view.getByRole("button", { name: /全部设备/ }).getAttribute(
+        "aria-pressed",
+      ),
+    ).toBe("true");
+    expect(view.getByRole("button", { name: /Mac mini/ })).not.toBeNull();
   });
 
   it("后台设备有审批时提醒并可切换来源设备", () => {
@@ -104,11 +132,9 @@ describe("多设备界面", () => {
       target: { value: "Mac mini" },
     });
     fireEvent.change(screen.getByLabelText("网关地址"), {
-      target: { value: "http://192.168.100.8:4173" },
+      target: { value: "http://192.168.100.8:4173/?token=secret" },
     });
-    fireEvent.change(screen.getByLabelText("访问口令"), {
-      target: { value: "secret" },
-    });
+    expect(screen.queryByLabelText("访问口令")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "测试并保存" }));
 
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
@@ -155,6 +181,9 @@ describe("多设备界面", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "编辑 Mac mini" }));
+    expect(
+      (screen.getByLabelText("网关地址") as HTMLInputElement).value,
+    ).toBe("http://192.168.100.8:4173/");
     fireEvent.change(screen.getByLabelText("设备名称"), {
       target: { value: "书房 Mac mini" },
     });

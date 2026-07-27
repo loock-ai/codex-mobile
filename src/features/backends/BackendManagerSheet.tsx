@@ -4,7 +4,9 @@ import {
   useState,
 } from "react";
 import {
+  formatBackendGatewayUrl,
   moveBackend,
+  parseBackendGatewayUrl,
   removeBackend,
   setBackendEnabled,
   upsertBackend,
@@ -22,8 +24,7 @@ import type {
 interface BackendDraft {
   id: string;
   name: string;
-  baseUrl: string;
-  token: string;
+  gatewayUrl: string;
   enabled: boolean;
   order: number;
 }
@@ -32,8 +33,7 @@ function newBackendDraft(order: number): BackendDraft {
   return {
     id: `backend-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name: "",
-    baseUrl: "http://",
-    token: "",
+    gatewayUrl: "http://",
     enabled: true,
     order,
   };
@@ -80,15 +80,18 @@ export function BackendManagerSheet({
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!draft || testing) return;
-    const candidate: BackendConfig = {
-      ...draft,
-      name: draft.name.trim(),
-      baseUrl: draft.baseUrl.trim(),
-      token: draft.token.trim(),
-    };
     setTesting(true);
     setError("");
     try {
+      const gateway = parseBackendGatewayUrl(draft.gatewayUrl);
+      const candidate: BackendConfig = {
+        id: draft.id,
+        name: draft.name.trim(),
+        baseUrl: gateway.baseUrl,
+        token: gateway.token,
+        enabled: draft.enabled,
+        order: draft.order,
+      };
       const host = await probe(candidate);
       const hostId = host.hostId.trim();
       if (!hostId) throw new Error("设备身份响应无效");
@@ -151,22 +154,10 @@ export function BackendManagerSheet({
               <input
                 aria-label="网关地址"
                 inputMode="url"
-                value={draft.baseUrl}
-                placeholder="http://192.168.100.8:4173"
+                value={draft.gatewayUrl}
+                placeholder="http://192.168.100.8:4173/?token=xxx"
                 onChange={(event) =>
-                  setDraft({ ...draft, baseUrl: event.target.value })
-                }
-              />
-            </label>
-            <label>
-              <span>访问口令</span>
-              <input
-                aria-label="访问口令"
-                type="password"
-                value={draft.token}
-                autoComplete="off"
-                onChange={(event) =>
-                  setDraft({ ...draft, token: event.target.value })
+                  setDraft({ ...draft, gatewayUrl: event.target.value })
                 }
               />
             </label>
@@ -243,7 +234,16 @@ export function BackendManagerSheet({
                         type="button"
                         aria-label={`编辑 ${backend.name}`}
                         onClick={() => {
-                          setDraft({ ...backend });
+                          setDraft({
+                            id: backend.id,
+                            name: backend.name,
+                            gatewayUrl: formatBackendGatewayUrl(
+                              backend.baseUrl,
+                              backend.token,
+                            ),
+                            enabled: backend.enabled,
+                            order: backend.order,
+                          });
                           setError("");
                         }}
                       >

@@ -13,22 +13,45 @@ export function BackendSwitcher({
   backends,
   summaries,
   selectedBackendId,
+  loadingBackendIds = new Set<string>(),
   onSelect,
-  onManage,
 }: {
   backends: BackendConfig[];
   summaries: Record<string, BackendRuntimeSummary>;
   selectedBackendId: string;
+  loadingBackendIds?: Set<string>;
   onSelect: (backendId: string) => void;
-  onManage: () => void;
 }) {
+  const enabledBackends = backends.filter((backend) => backend.enabled);
+  const allBusy = enabledBackends.some(
+    (backend) => summaries[backend.id]?.busy,
+  );
+  const allApprovalCount = enabledBackends.reduce(
+    (total, backend) => total + (summaries[backend.id]?.approvalCount ?? 0),
+    0,
+  );
   return (
     <nav className="backend-switcher" aria-label="设备">
-      {backends.filter((backend) => backend.enabled).map((backend) => {
+      <button
+        type="button"
+        className="backend-pill all-backends"
+        aria-label={`全部设备${allBusy ? "，存在进行中任务" : ""}`}
+        aria-pressed={selectedBackendId === "all"}
+        onClick={() => onSelect("all")}
+      >
+        <strong>全部</strong>
+        {allBusy && <i className="backend-busy" aria-hidden="true" />}
+        {!!allApprovalCount && (
+          <b className="backend-approval-count">{allApprovalCount}</b>
+        )}
+      </button>
+      {enabledBackends.map((backend) => {
         const summary = summaries[backend.id];
         const status = summary?.connection ?? "connecting";
+        const loading = loadingBackendIds.has(backend.id);
         const details = [
           statusLabel(summary),
+          loading ? "正在加载会话" : "",
           summary?.busy ? "进行中" : "",
           summary?.approvalCount
             ? `${summary.approvalCount} 个待审批`
@@ -43,7 +66,14 @@ export function BackendSwitcher({
             key={backend.id}
             onClick={() => onSelect(backend.id)}
           >
-            <i className={`status-dot ${status}`} />
+            {loading ? (
+              <i
+                className="action-spinner backend-loading"
+                aria-label="正在加载机器会话"
+              />
+            ) : (
+              <i className={`status-dot ${status}`} />
+            )}
             <span aria-hidden="true">▰</span>
             <strong>{backend.name}</strong>
             {summary?.busy && (
@@ -57,14 +87,6 @@ export function BackendSwitcher({
           </button>
         );
       })}
-      <button
-        type="button"
-        className="backend-add"
-        aria-label="添加或管理设备"
-        onClick={onManage}
-      >
-        ＋
-      </button>
     </nav>
   );
 }

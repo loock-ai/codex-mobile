@@ -407,17 +407,17 @@ test("移动端选择器、线程恢复、Markdown、折叠与吸顶", async ({ 
   await expect(listHeader.locator("h1")).toHaveCSS("font-size", "20px");
   await expect(page.locator(".thread-row").first()).toHaveCSS(
     "font-size",
-    "16px",
+    "15px",
   );
   await expect(page.locator(".thread-row").first()).toHaveCSS(
     "line-height",
-    "32px",
+    "20.25px",
   );
   await expect(page.locator(".thread-row").first()).toHaveCSS(
     "min-height",
-    "auto",
+    "54px",
   );
-  await expect(page.locator(".round-button").first()).toHaveCSS(
+  await expect(page.locator(".list-header .round-button")).toHaveCSS(
     "width",
     "44px",
   );
@@ -435,12 +435,12 @@ test("移动端选择器、线程恢复、Markdown、折叠与吸顶", async ({ 
   await page.getByRole("button", { name: /Markdown 会话/ }).click();
   await expect
     .poll(() =>
-      page.evaluate(
-        () =>
+      page.locator(".conversation-scroll").evaluate(
+        (element) =>
           Math.round(
-            document.documentElement.scrollHeight -
-              window.scrollY -
-              window.innerHeight,
+            element.scrollHeight -
+              element.scrollTop -
+              element.clientHeight,
           ),
       ),
     )
@@ -680,8 +680,17 @@ test("移动端选择器、线程恢复、Markdown、折叠与吸顶", async ({ 
   await expect(page.getByText("正在检查实时过程。")).toHaveCount(0);
   await expect(previousMessages).toHaveAttribute("aria-expanded", "false");
 
-  await page.getByRole("button", { name: "返回" }).click();
-  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(0);
+  const detailScrollY = await page
+    .locator(".conversation-scroll")
+    .evaluate((element) => Math.round(element.scrollTop));
+  await page.getByRole("button", { name: "打开会话列表" }).click();
+  await expect
+    .poll(() =>
+      page
+        .locator(".conversation-scroll")
+        .evaluate((element) => Math.round(element.scrollTop)),
+    )
+    .toBe(detailScrollY);
   await expect(
     page.getByRole("button", { name: /Markdown 会话/ }),
   ).toBeInViewport();
@@ -991,11 +1000,12 @@ test("多设备同时连接、切换、缓存并路由后台审批", async ({ pa
   await page.getByRole("button", { name: "管理设备", exact: true }).click();
   await page.getByRole("button", { name: "添加设备" }).click();
   await page.getByLabel("设备名称").fill("Studio Mac");
-  await page.getByLabel("网关地址").fill("http://studio.test:4173");
-  await page.getByLabel("访问口令").fill("studio-token");
+  await page
+    .getByLabel("网关地址")
+    .fill("http://studio.test:4173/?token=studio-token");
   await page.getByRole("button", { name: "测试并保存" }).click();
   await expect(page.getByRole("heading", { name: "管理设备" })).toBeVisible();
-  await page.getByRole("button", { name: "关闭" }).click();
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
   await expect(page.getByRole("button", { name: /Studio Mac.*已连接/ }))
     .toBeVisible();
 
@@ -1037,10 +1047,12 @@ test("多设备同时连接、切换、缓存并路由后台审批", async ({ pa
   expect(widths.body).toBeLessThanOrEqual(widths.viewport);
 });
 
-test("移动端可连接真实 app-server 并进入新对话", async ({ page }) => {
+test("移动端可连接真实 app-server 并校验新聊天目标", async ({ page }) => {
   test.setTimeout(130_000);
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Remote" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Codex Mobile" }),
+  ).toBeVisible();
   await expect(page.getByText("已连接", { exact: false })).toBeVisible();
   await expect(page.getByPlaceholder("搜索聊天")).toBeVisible();
 
@@ -1049,14 +1061,26 @@ test("移动端可连接真实 app-server 并进入新对话", async ({ page }) 
   await expect(
     page.getByRole("button", { name: "选择审批与权限模式" }),
   ).toBeVisible();
-
-  await page.getByRole("textbox", { name: "向 Codex 提问" }).fill(
-    "只回复 E2E_OK，不要调用任何工具。",
+  await expect(page.getByRole("combobox", { name: "选择机器" })).toBeVisible();
+  const noProjects = page.getByText(
+    "没有可用项目，暂时无法启动新聊天。",
   );
-  await page.getByRole("button", { name: "发送", exact: true }).click();
-  await expect(page.getByText("E2E_OK", { exact: true })).toBeVisible({
-    timeout: 120_000,
-  });
+  if (await noProjects.isVisible()) {
+    await expect(
+      page.getByRole("textbox", { name: "向 Codex 提问" }),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "发送", exact: true }),
+    ).toBeDisabled();
+  } else {
+    await page.getByRole("textbox", { name: "向 Codex 提问" }).fill(
+      "只回复 E2E_OK，不要调用任何工具。",
+    );
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await expect(page.getByText("E2E_OK", { exact: true })).toBeVisible({
+      timeout: 120_000,
+    });
+  }
 });
 
 test("多个协议 turn 在同一用户任务中只显示一个统一折叠区", async ({
@@ -1260,6 +1284,7 @@ test("新会话启动期间返回列表不会被迟到响应重新拉回且任�
               {
                 id: "existing",
                 preview: "已有会话",
+                cwd: "/tmp/project",
                 updatedAt: now,
                 status: { type: "idle" },
               },
@@ -1269,6 +1294,7 @@ test("新会话启动期间返回列表不会被迟到响应重新拉回且任�
             thread: {
               id: "delayed-thread",
               preview: "延迟启动的任务",
+              cwd: "/tmp/project",
               updatedAt: now + 1,
               turns: [],
             },
@@ -1326,7 +1352,7 @@ test("新会话启动期间返回列表不会被迟到响应重新拉回且任�
   await page.getByRole("button", { name: "聊天", exact: true }).click();
   await page.getByRole("textbox", { name: "向 Codex 提问" }).fill("开始任务");
   await page.getByRole("button", { name: "发送", exact: true }).click();
-  await page.getByRole("button", { name: "返回" }).click();
+  await page.getByRole("button", { name: "打开会话列表" }).click();
 
   await expect(page.getByPlaceholder("搜索聊天")).toBeVisible();
   const delayedThread = page.getByRole("button", {
@@ -1585,7 +1611,7 @@ test("会话加载中返回并打开其他会话后忽略旧详情响应", async
   await expect(
     page.getByRole("status", { name: "正在加载会话详情" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "返回" }).click();
+  await page.getByRole("button", { name: "打开会话列表" }).click();
   await expect(page.getByPlaceholder("搜索聊天")).toBeVisible();
   await expect(page.getByRole("button", { name: /可取消加载/ }))
     .toBeEnabled();

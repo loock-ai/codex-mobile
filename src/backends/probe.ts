@@ -10,6 +10,18 @@ export interface GatewayHostInfo {
   appServerReady: boolean;
 }
 
+export async function fetchBackendProjects(config: BackendConfig) {
+  const response = await fetch(
+    withToken(config.baseUrl, "/api/projects", config.token),
+    { method: "GET", mode: "cors" },
+  );
+  if (!response.ok) throw new Error(`项目目录接口返回 ${response.status}`);
+  const payload = (await response.json()) as { projects?: unknown };
+  return Array.isArray(payload.projects)
+    ? payload.projects.filter((project): project is string => typeof project === "string")
+    : [];
+}
+
 function withToken(baseUrl: string, path: string, token: string) {
   const url = new URL(path, `${baseUrl}/`);
   if (token) url.searchParams.set("token", token);

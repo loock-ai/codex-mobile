@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { hostname as readHostname } from "node:os";
+import { join } from "node:path";
 import { createGateway, type Gateway } from "./gateway.js";
 import {
   assertGatewaySecurity,
@@ -7,6 +8,7 @@ import {
   resolveRuntimeConfig,
   startManagedAppServer,
 } from "./app-server-manager.js";
+import { readCodexProjectDirectories } from "./codex-projects.js";
 
 const runtime = resolveRuntimeConfig();
 const gatewayRuntime = resolveGatewayRuntimeConfig(
@@ -38,6 +40,13 @@ try {
     hostname: gatewayRuntime.hostname,
     gatewayVersion: process.env.npm_package_version ?? "0.2.0",
     allowedOrigins: gatewayRuntime.allowedOrigins,
+    readProjectDirectories: () =>
+      readCodexProjectDirectories(
+        join(
+          process.env.CODEX_HOME || join(process.env.HOME || "", ".codex"),
+          ".codex-global-state.json",
+        ),
+      ),
     appServerReady: async () => {
       try {
         const ready = new URL(runtime.upstreamUrl);

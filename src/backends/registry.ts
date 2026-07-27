@@ -7,6 +7,43 @@ export const BACKEND_REGISTRY_STORAGE_KEY =
   "codex-mobile.backend-registry.v1";
 export const MAX_BACKENDS = 8;
 
+export function parseBackendGatewayUrl(value: string) {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new Error("网关地址无效");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("网关地址仅支持 HTTP 或 HTTPS");
+  }
+  if (url.username || url.password) {
+    throw new Error("网关地址不能包含用户名或密码");
+  }
+  if ((url.pathname && url.pathname !== "/") || url.hash) {
+    throw new Error("网关地址不能包含路径或锚点");
+  }
+  const unsupportedParameters = [...url.searchParams.keys()].filter(
+    (key) => key !== "token",
+  );
+  if (unsupportedParameters.length) {
+    throw new Error("网关地址仅支持 token 查询参数");
+  }
+  if (url.searchParams.getAll("token").length > 1) {
+    throw new Error("网关地址只能包含一个 token");
+  }
+  return {
+    baseUrl: url.origin,
+    token: url.searchParams.get("token")?.trim() ?? "",
+  };
+}
+
+export function formatBackendGatewayUrl(baseUrl: string, token: string) {
+  const url = new URL(normalizeBackendBaseUrl(baseUrl));
+  if (token) url.searchParams.set("token", token);
+  return url.toString();
+}
+
 export function normalizeBackendBaseUrl(value: string) {
   let url: URL;
   try {

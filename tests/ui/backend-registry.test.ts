@@ -4,9 +4,11 @@ import {
   MAX_BACKENDS,
   assignBackendHostId,
   createDefaultBackendRegistry,
+  formatBackendGatewayUrl,
   loadBackendRegistry,
   moveBackend,
   normalizeBackendBaseUrl,
+  parseBackendGatewayUrl,
   removeBackend,
   saveBackendRegistry,
   setBackendEnabled,
@@ -80,6 +82,33 @@ describe("多后端配置存储", () => {
     expect(() =>
       normalizeBackendBaseUrl("http://mac-mini.local:4173/api"),
     ).toThrow("不能包含路径");
+  });
+
+  it("从完整网关地址解析 token，并可还原为编辑地址", () => {
+    expect(
+      parseBackendGatewayUrl(
+        " http://192.168.100.8:4173/?token=a%20b ",
+      ),
+    ).toEqual({
+      baseUrl: "http://192.168.100.8:4173",
+      token: "a b",
+    });
+    expect(
+      formatBackendGatewayUrl("http://192.168.100.8:4173", "a b"),
+    ).toBe("http://192.168.100.8:4173/?token=a+b");
+  });
+
+  it("完整网关地址拒绝 token 之外的查询参数", () => {
+    expect(() =>
+      parseBackendGatewayUrl(
+        "http://192.168.100.8:4173/?token=secret&debug=1",
+      ),
+    ).toThrow("仅支持 token 查询参数");
+    expect(() =>
+      parseBackendGatewayUrl(
+        "http://192.168.100.8:4173/?token=one&token=two",
+      ),
+    ).toThrow("只能包含一个 token");
   });
 
   it("读取时清理损坏条目并修复无效选择", () => {

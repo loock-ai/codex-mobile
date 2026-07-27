@@ -5,25 +5,34 @@ import {
 import {
   AppIcon,
   titleOf,
-  type ConnectionState,
-  type DisplayRecord,
   type ThreadListState,
 } from "../../ui/app-display";
 import type {
   BackendConfig,
   BackendRuntimeSummary,
 } from "../../backends/types";
+import type { ProjectThreadLoadState } from "../../app-server/thread-list-loader";
 import { BackendSwitcher } from "../backends/BackendSwitcher";
+import {
+  groupThreadsByProject,
+  splitAllThreads,
+  type AggregatedThreadItem,
+} from "./thread-list-model";
+import { projectCollapseKey } from "./project-collapse";
 
 export function ThreadListPage({
-  connection,
-  hostname,
   backends,
   summaries,
   selectedBackendId,
+  loadingBackendIds,
   threadListState,
   visibleThreads,
   totalThreadCount,
+  projectDirectories,
+  projectThreadStates,
+  projectVisibleCounts,
+  collapsedProjectKeys,
+  loadingProjectKeys,
   openingThreadId,
   query,
   listNow,
@@ -33,49 +42,127 @@ export function ThreadListPage({
   onNewChat,
   onSelectBackend,
   onManageBackends,
+  onRefresh,
+  onRetryProject,
+  onToggleProject,
+  onToggleProjectCollapsed,
 }: {
-  connection: ConnectionState;
-  hostname: string;
   backends: BackendConfig[];
   summaries: Record<string, BackendRuntimeSummary>;
   selectedBackendId: string;
+  loadingBackendIds: Set<string>;
   threadListState: ThreadListState;
-  visibleThreads: DisplayRecord[];
+  visibleThreads: AggregatedThreadItem[];
   totalThreadCount: number;
+  projectDirectories: string[];
+  projectThreadStates: Record<string, ProjectThreadLoadState>;
+  projectVisibleCounts: Record<string, number>;
+  collapsedProjectKeys: Set<string>;
+  loadingProjectKeys: Set<string>;
   openingThreadId: string;
   query: string;
   listNow: number;
   error: string;
   onQueryChange: (value: string) => void;
-  onOpenThread: (thread: DisplayRecord) => void | Promise<void>;
+  onOpenThread: (thread: AggregatedThreadItem) => void | Promise<void>;
   onNewChat: () => void;
   onSelectBackend: (backendId: string) => void;
   onManageBackends: () => void;
+  onRefresh: () => void;
+  onRetryProject: (backendId: string, cwd: string) => void;
+  onToggleProject: (backendId: string, cwd: string) => void;
+  onToggleProjectCollapsed: (backendId: string, cwd: string) => void;
 }) {
+  const enabledBackends = backends.filter((backend) => backend.enabled);
+  const onlineCount = enabledBackends.filter(
+    (backend) => summaries[backend.id]?.connection === "online",
+  ).length;
+  const selectedBackend = enabledBackends.find(
+    (backend) => backend.id === selectedBackendId,
+  );
+  const selectedSummary = selectedBackend
+    ? summaries[selectedBackend.id]
+    : undefined;
+  const allGroups = splitAllThreads(visibleThreads);
+  const projectGroups = groupThreadsByProject(visibleThreads, projectDirectories);
+  const renderRow = (
+    thread: AggregatedThreadItem,
+    showSource: boolean,
+  ) => (
+    <button
+      key={`${thread.backendId}:${thread.threadId}`}
+      className={`thread-row${showSource ? " with-source" : ""}`}
+      disabled={openingThreadId === `${thread.backendId}:${thread.threadId}`}
+      aria-busy={openingThreadId === `${thread.backendId}:${thread.threadId}`}
+      onClick={() => void onOpenThread(thread)}
+    >
+      <span className="thread-row-title">
+        <span>{titleOf(thread.thread)}</span>
+      </span>
+      {isThreadRunning(thread.status) ? (
+        <span className="thread-running" aria-label="进行中">
+          <i className="running-dot" />
+          <i className="running-spinner" />
+        </span>
+      ) : (
+        <span className="thread-row-meta">
+          {thread.unread && (
+            <i className="thread-unread-dot" aria-label="未读" />
+          )}
+          <time>{relativeTime(thread.timestamp, listNow)}</time>
+        </span>
+      )}
+      {showSource && (
+        <small className="thread-source">
+          <i className="status-dot online" />
+          {thread.backendName} · {thread.projectName}
+        </small>
+      )}
+    </button>
+  );
+
   return (
     <section className="thread-list-page">
       <header className="list-header">
-        <button className="round-button" aria-label="返回"><AppIcon name="back" /></button>
         <div>
-          <h1>Remote</h1>
-          <p><i className={`status-dot ${connection}`} /> {hostname} · {connection === "online" ? "已连接" : connection === "offline" ? "已断开" : "连接中"}</p>
+          <h1>Codex Mobile</h1>
+          <p>
+            <i
+              className={`status-dot ${
+                onlineCount ? "online" : "connecting"
+              }`}
+            />
+            {selectedBackend
+              ? `${selectedBackend.name} · ${
+                  selectedSummary?.connection === "online"
+                    ? "已连接"
+                    : selectedSummary?.connection === "offline"
+                      ? "已断开"
+                      : "连接中"
+                }`
+              : `${enabledBackends.length} 台机器 · ${onlineCount} 台已连接`}
+          </p>
         </div>
-        <button
-          className="round-button"
-          aria-label="管理设备"
-          onClick={onManageBackends}
-        >
-          <AppIcon name="more" />
-        </button>
+        <div className="list-header-actions">
+          <button className="round-button" aria-label="刷新会话列表" onClick={onRefresh}>
+            <AppIcon name="refresh" />
+          </button>
+          <button
+            className="round-button"
+            aria-label="管理设备"
+            onClick={onManageBackends}
+          >
+            <AppIcon name="more" />
+          </button>
+        </div>
       </header>
       <BackendSwitcher
         backends={backends}
         summaries={summaries}
         selectedBackendId={selectedBackendId}
+        loadingBackendIds={loadingBackendIds}
         onSelect={onSelectBackend}
-        onManage={onManageBackends}
       />
-      <h2>最近</h2>
       <div className="thread-list">
         {threadListState === "loading" && (
           <div
@@ -91,31 +178,140 @@ export function ThreadListPage({
             ))}
           </div>
         )}
-        {threadListState !== "loading" && visibleThreads.map((thread) => (
-          <button
-            key={thread.id}
-            className="thread-row"
-            disabled={openingThreadId === thread.id}
-            aria-busy={openingThreadId === thread.id}
-            onClick={() => void onOpenThread(thread)}
-          >
-            <span>{titleOf(thread)}</span>
-            {isThreadRunning(thread.status) ? (
-              <span className="thread-running" aria-label="进行中">
-                <i className="running-dot" />
-                <i className="running-spinner" />
-              </span>
-            ) : (
-              <time>
-                {relativeTime(
-                  thread.updatedAt ?? thread.createdAt ?? 0,
-                  listNow,
-                )}
-              </time>
+        {threadListState !== "loading" && selectedBackendId === "all" && (
+          <>
+            {!!allGroups.pinned.length && (
+              <section className="thread-section">
+                <h2>置顶</h2>
+                {allGroups.pinned.map((thread) => renderRow(thread, true))}
+              </section>
             )}
-          </button>
-        ))}
-        {threadListState === "ready" && !visibleThreads.length && (
+            {!!allGroups.recent.length && (
+              <section className="thread-section">
+                <h2>最近</h2>
+                {allGroups.recent.map((thread) => renderRow(thread, true))}
+              </section>
+            )}
+          </>
+        )}
+        {threadListState !== "loading" && selectedBackendId !== "all" && (
+          <>
+            {projectGroups
+              .filter(
+                (group) => !query.trim() || group.threads.length > 0,
+              )
+              .map((group) => {
+                const projectKey = projectCollapseKey(
+                  selectedBackendId,
+                  group.cwd,
+                );
+                const isExpanded =
+                  Boolean(query.trim()) ||
+                  !collapsedProjectKeys.has(projectKey);
+                const visibleCount =
+                  projectVisibleCounts[projectKey] ?? 5;
+                const isLoadingMore = loadingProjectKeys.has(projectKey);
+                const projectThreadState =
+                  projectThreadStates[group.cwd] ??
+                  (group.threads.length ? "ready" : "idle");
+                const showInitialLoading =
+                  projectThreadState === "loading" &&
+                  group.threads.length === 0;
+                const showInitialError =
+                  projectThreadState === "error" &&
+                  group.threads.length === 0;
+                return (
+                  <section className="project-group" key={group.cwd}>
+                    <h2>
+                      <button
+                        type="button"
+                        className="project-heading"
+                        aria-expanded={isExpanded}
+                        onClick={() =>
+                          onToggleProjectCollapsed(
+                            selectedBackendId,
+                            group.cwd,
+                          )
+                        }
+                      >
+                        <AppIcon
+                          name={isExpanded ? "folder-open" : "folder"}
+                        />
+                        <span>{group.projectName}</span>
+                      </button>
+                    </h2>
+                    {isExpanded && (
+                      <>
+                        {group.threads
+                          .slice(0, visibleCount)
+                          .map((thread) => renderRow(thread, false))}
+                        {showInitialLoading && (
+                          <div
+                            className="project-thread-skeleton"
+                            aria-label="正在加载项目会话"
+                            role="status"
+                          >
+                            {Array.from({ length: 3 }, (_, index) => (
+                              <div className="thread-row-skeleton" key={index}>
+                                <i />
+                                <i />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {showInitialError && (
+                          <button
+                            type="button"
+                            className="project-retry"
+                            aria-label={`重试加载 ${group.projectName} 会话`}
+                            onClick={() =>
+                              onRetryProject(selectedBackendId, group.cwd)
+                            }
+                          >
+                            加载失败，点击重试
+                          </button>
+                        )}
+                        {!showInitialLoading &&
+                          !showInitialError &&
+                          (isLoadingMore ||
+                            group.threads.length >= visibleCount) && (
+                          <button
+                            type="button"
+                            className="project-more"
+                            disabled={isLoadingMore}
+                            aria-busy={isLoadingMore}
+                            onClick={() =>
+                              onToggleProject(
+                                selectedBackendId,
+                                group.cwd,
+                              )
+                            }
+                          >
+                            {isLoadingMore ? (
+                              <>
+                                <i
+                                  className="action-spinner"
+                                  aria-hidden="true"
+                                />
+                                加载中
+                              </>
+                            ) : (
+                              "展开显示"
+                            )}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </section>
+                );
+              })}
+          </>
+        )}
+        {threadListState === "ready" &&
+          !visibleThreads.length &&
+          (selectedBackendId === "all" ||
+            !projectDirectories.length ||
+            Boolean(query.trim())) && (
           <div className="empty-state">
             {query.trim() ? "没有匹配的对话" : "暂无对话"}
           </div>
