@@ -110,6 +110,10 @@ describe("移动 App 内置前端流水线", () => {
     expect(hardenHost).toContain("allowed_permissions");
     expect(hardenHost).toContain('android:allowBackup="false"');
     expect(verifyArtifact).toContain("apkanalyzer manifest print");
+    expect(verifyArtifact).toContain(
+      "DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+    );
+    expect(verifyArtifact).toContain("protectionLevel");
     expect(verifyArtifact).toContain("CodexMobile-unpacked-assets");
     expect(verifyArtifact).toContain(
       'node "$RUNNER_TEMP/scan-mobile-assets.cjs" "$unpacked_assets/assets"',
@@ -149,11 +153,19 @@ describe("移动 App 内置前端流水线", () => {
     expect(hardenHost).toContain("developerExtrasEnabled");
     expect(hardenHost).toContain("decisionHandler(.deny)");
     expect(hardenHost).toContain(
+      'index_source.replace("./assets/", "./")',
+    );
+    expect(hardenHost).toContain(
       'node "$RUNNER_TEMP/scan-mobile-assets.cjs" PakePlus',
     );
     expect(verifyArtifact).toContain("Print :DEBUG");
     expect(verifyArtifact).toContain(":NSLocationWhenInUseUsageDescription");
     expect(verifyArtifact).toContain(":UIBackgroundModes");
+    expect(verifyArtifact).toContain('find "$app" -maxdepth 1');
+    expect(verifyArtifact).toContain(
+      "Payload/PakePlus.app/index-.+\\.js",
+    );
+    expect(verifyArtifact).not.toContain('find "$app/assets"');
     expect(verifyArtifact).toContain("CodexMobile-ios-unpacked");
     expect(verifyArtifact).toContain(
       'node "$RUNNER_TEMP/scan-mobile-assets.cjs"',

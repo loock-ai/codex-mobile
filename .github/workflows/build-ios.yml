@@ -257,9 +257,18 @@ jobs:
           source = source.replace(geolocation_prompt, "")
           path.write_text(source)
           Path("PakePlus/vConsole.js").unlink(missing_ok=True)
+          index_path = Path("PakePlus/index.html")
+          index_source = index_path.read_text()
+          if "./assets/" not in index_source:
+              raise SystemExit("Generated Vite asset paths are missing")
+          index_path.write_text(index_source.replace("./assets/", "./"))
           PY
           test -s PakePlus/index.html
           find PakePlus/assets -type f -name '*.js' -print -quit | grep -q .
+          if grep -Fq './assets/' PakePlus/index.html; then
+            echo "::error::iOS bundle would flatten the Vite assets directory"
+            exit 1
+          fi
           test "$(/usr/libexec/PlistBuddy -c 'Print :DEBUG' "$plist")" = "false"
           test "$(/usr/libexec/PlistBuddy \
             -c 'Print :NSAppTransportSecurity:NSAllowsLocalNetworking' \
@@ -320,7 +329,8 @@ jobs:
           unpacked="$RUNNER_TEMP/CodexMobile-ios-unpacked"
           test -d "$app"
           test -s "$app/index.html"
-          find "$app/assets" -type f -name '*.js' -print -quit | grep -q .
+          find "$app" -maxdepth 1 -type f -name 'index-*.js' -print -quit \
+            | grep -q .
           test "$(/usr/libexec/PlistBuddy -c 'Print :DEBUG' \
             "$app/Info.plist")" = "false"
           test "$(/usr/libexec/PlistBuddy \
@@ -350,7 +360,7 @@ jobs:
           test -s "$artifact"
           unzip -l "$artifact" > "$listing"
           grep -Fq 'Payload/PakePlus.app/index.html' "$listing"
-          grep -Eq 'Payload/PakePlus.app/assets/.+\.js' "$listing"
+          grep -Eq 'Payload/PakePlus.app/index-.+\.js' "$listing"
           unzip -q "$artifact" -d "$unpacked"
           node "$RUNNER_TEMP/scan-mobile-assets.cjs" \
             "$unpacked/Payload/PakePlus.app"

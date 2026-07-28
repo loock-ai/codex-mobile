@@ -301,11 +301,15 @@ jobs:
           grep -Eq 'assets/assets/.+\.js' "$listing"
           apkanalyzer manifest print "$artifact" > "$final_manifest"
           python3 - "$final_manifest" <<'PY'
+          import os
           import sys
           import xml.etree.ElementTree as ET
 
           android = "http://schemas.android.com/apk/res/android"
           root = ET.parse(sys.argv[1]).getroot()
+          dynamic_receiver_permission = (
+              f"{os.environ['APP_ID']}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+          )
           permissions = {
               element.get(f"{{{android}}}name", "")
               for element in root.findall("uses-permission")
@@ -313,9 +317,20 @@ jobs:
           allowed_permissions = {
               "android.permission.INTERNET",
               "android.permission.ACCESS_NETWORK_STATE",
+              dynamic_receiver_permission,
           }
           if permissions != allowed_permissions:
               raise SystemExit(f"Unexpected final APK permissions: {sorted(permissions)}")
+          permission_definitions = {
+              element.get(f"{{{android}}}name", ""):
+                  element.get(f"{{{android}}}protectionLevel", "")
+              for element in root.findall("permission")
+          }
+          if permission_definitions != {dynamic_receiver_permission: "signature"}:
+              raise SystemExit(
+                  f"Unexpected final APK permission definitions: "
+                  f"{permission_definitions}"
+              )
           application = root.find("application")
           if application is None or application.get(f"{{{android}}}allowBackup") != "false":
               raise SystemExit("Final APK must disable application backup")
