@@ -22,9 +22,13 @@ PakePlus Android 容器已经调用 `enableEdgeToEdge()`，但当前又把系统
 Android 流水线在生成 PakePlus 工程后，对固定上游提交执行受保护的源码转换：
 
 1. 保留 `enableEdgeToEdge()` 和状态栏图标。
-2. 明确保持 `fullScreen=false`，不隐藏状态栏或导航栏。
+2. 明确设置 `safeArea=all`，使生成的 `app.json` 保持
+   `fullScreen=false`，不隐藏状态栏或导航栏。
 3. 根容器保留左、右、底部系统栏 padding，但把顶部原生 padding 设为 0。
 4. 继续返回原始 `WindowInsets`，让 WebView 接收并转发安全区信息。
+5. 原生层同时把顶部 inset 换算为 CSS 像素，通过 `JsBridge` 和 inset
+   变化事件写入 `--native-safe-area-top`；页面取它与标准
+   `env(safe-area-inset-top)` 的较大值，兼容尚未完整支持 WebView 安全区的系统版本。
 
 前端移除 Android WebView 将 `--safe-area-top` 强制归零的覆盖，统一使用
 `env(safe-area-inset-top)`。页面背景因此绘制到透明状态栏下方，现有列表头部和
@@ -40,8 +44,8 @@ Android 流水线在生成 PakePlus 工程后，对固定上游提交执行受�
 ## TDD 与验证
 
 1. 先增加组件测试，断言新增设备时网关地址为空。
-2. 先增加工作流契约测试，断言 Android 配置保持非全屏，并对生成容器应用顶部
-   edge-to-edge 转换。
+2. 先增加工作流契约测试，断言 Android 配置使用 `safeArea=all`、生成结果保持
+   非全屏，并对生成容器应用顶部 edge-to-edge 转换及原生安全区兜底。
 3. 先增加样式契约测试，断言 Android WebView 不再把顶部 safe-area 强制归零。
 4. 运行定向测试，确认旧实现失败。
 5. 完成最小实现后运行定向测试、完整测试、类型检查和生产构建。

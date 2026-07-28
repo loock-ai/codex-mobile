@@ -33,7 +33,7 @@ function newBackendDraft(order: number): BackendDraft {
   return {
     id: `backend-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name: "",
-    gatewayUrl: "http://",
+    gatewayUrl: "",
     enabled: true,
     order,
   };

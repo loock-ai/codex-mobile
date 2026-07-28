@@ -196,6 +196,7 @@ jobs:
               | .android.desc = "Codex Mobile"
               | .android.pubBody = ($displayName + " v" + $version)
               | .android.isHtml = true
+              | .android.safeArea = "all"
               | .android.debug = false
               | .phone.internet = true
             ' scripts/ppconfig.json > "$RUNNER_TEMP/ppconfig-android.json"
@@ -207,6 +208,7 @@ jobs:
               .android.id == $appid
               and .android.version == $version
               and .android.isHtml == true
+              and .android.safeArea == "all"
               and .android.webUrl == ""
               and .phone.internet == true
             ' scripts/ppconfig.json > /dev/null
@@ -257,13 +259,93 @@ jobs:
           tree.write(manifest_path, encoding="utf-8", xml_declaration=True)
           for unused_asset in ("vConsole.js", "pppwd.html"):
               Path("app/src/main/assets", unused_asset).unlink(missing_ok=True)
+
+          activity_path = Path(
+              "app/src/main/java/com/app/pakeplus/MainActivity.kt"
+          )
+          activity_source = activity_path.read_text()
+          if "enableEdgeToEdge()" not in activity_source:
+              raise SystemExit("Pinned PakePlus edge-to-edge setup changed")
+          webview_field = "    private lateinit var webView: WebView\n"
+          safe_area_field = (
+              webview_field
+              + "    @Volatile\n"
+              + "    private var nativeSafeAreaTopCssPx = 0.0\n"
+          )
+          original_insets = "\n".join((
+              "            val systemBar = insets.getInsets(WindowInsetsCompat.Type.systemBars())",
+              "            view.setPadding(systemBar.left, systemBar.top, systemBar.right, systemBar.bottom)",
+              "            insets",
+          ))
+          edge_to_edge_insets = "\n".join((
+              "            val systemBar = insets.getInsets(WindowInsetsCompat.Type.systemBars())",
+              "            nativeSafeAreaTopCssPx =",
+              "                systemBar.top / resources.displayMetrics.density.toDouble()",
+              "            view.setPadding(systemBar.left, 0, systemBar.right, systemBar.bottom)",
+              "            val insetWebView = view.findViewById<WebView>(R.id.webview)",
+              "            val cssTop = nativeSafeAreaTopCssPx",
+              "            insetWebView.post {",
+              "                insetWebView.evaluateJavascript(",
+              "                    \"document.documentElement.style.setProperty('--native-safe-area-top', '${cssTop}px')\",",
+              "                    null",
+              "                )",
+              "            }",
+              "            insets",
+          ))
+          js_interface_anchor = "        // 判断是不是安卓客户端\n"
+          safe_area_interface = "\n".join((
+              "        @JavascriptInterface",
+              "        fun safeAreaTopCssPx(): Double {",
+              "            return this@MainActivity.nativeSafeAreaTopCssPx",
+              "        }",
+              "",
+              "",
+          ))
+          if activity_source.count(webview_field) != 1:
+              raise SystemExit("Pinned PakePlus WebView field changed")
+          if activity_source.count(original_insets) != 1:
+              raise SystemExit("Pinned PakePlus system-bar inset hook changed")
+          if activity_source.count(js_interface_anchor) != 1:
+              raise SystemExit("Pinned PakePlus JavaScript interface changed")
+          activity_path.write_text(
+              activity_source
+              .replace(
+                  webview_field,
+                  safe_area_field,
+                  1,
+              )
+              .replace(
+                  original_insets,
+                  edge_to_edge_insets,
+                  1,
+              )
+              .replace(
+                  js_interface_anchor,
+                  safe_area_interface + js_interface_anchor,
+                  1,
+              )
+          )
           PY
           test -s app/src/main/assets/index.html
           find app/src/main/assets/assets -type f -name '*.js' -print -quit \
             | grep -q .
           jq -e \
-            '.webUrl == "file:///android_asset/index.html" and .internet == true' \
+            '
+              .webUrl == "file:///android_asset/index.html"
+              and .internet == true
+              and .fullScreen == false
+            ' \
             app/src/main/assets/app.json > /dev/null
+          grep -Fq 'enableEdgeToEdge()' \
+            app/src/main/java/com/app/pakeplus/MainActivity.kt
+          grep -Fq \
+            'view.setPadding(systemBar.left, 0, systemBar.right, systemBar.bottom)' \
+            app/src/main/java/com/app/pakeplus/MainActivity.kt
+          grep -Fq 'fun safeAreaTopCssPx(): Double' \
+            app/src/main/java/com/app/pakeplus/MainActivity.kt
+          grep -Fq \
+            "document.documentElement.style.setProperty('--native-safe-area-top'" \
+            app/src/main/java/com/app/pakeplus/MainActivity.kt
           grep -Fq "applicationId = \"$APP_ID\"" app/build.gradle.kts
           grep -Fq "versionName = \"$APP_VERSION\"" app/build.gradle.kts
           grep -Fq 'android:allowBackup="false"' app/src/main/AndroidManifest.xml

@@ -128,6 +128,9 @@ describe("多设备界面", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "添加设备" }));
+    expect(
+      (screen.getByLabelText("网关地址") as HTMLInputElement).value,
+    ).toBe("");
     fireEvent.change(screen.getByLabelText("设备名称"), {
       target: { value: "Mac mini" },
     });

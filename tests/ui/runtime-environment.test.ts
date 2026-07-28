@@ -26,4 +26,39 @@ describe("运行容器识别", () => {
     applyRuntimeEnvironment(root, "Mozilla/5.0 Chrome/138 Safari/537.36");
     expect(root.classList.contains("android-webview")).toBe(false);
   });
+
+  it("Android WebView 使用原生顶部安全区作为旧版兼容兜底", () => {
+    const root = document.createElement("html");
+    const bridge = {
+      safeAreaTopCssPx: () => 28,
+    };
+
+    applyRuntimeEnvironment(root, "Android; wv)", bridge);
+    expect(root.style.getPropertyValue("--native-safe-area-top")).toBe("28px");
+
+    applyRuntimeEnvironment(
+      root,
+      "Mozilla/5.0 Chrome/138 Safari/537.36",
+      bridge,
+    );
+    expect(root.style.getPropertyValue("--native-safe-area-top")).toBe("");
+  });
+
+  it("忽略不可用或异常的原生安全区桥接", () => {
+    const root = document.createElement("html");
+
+    expect(() =>
+      applyRuntimeEnvironment(root, "Android; wv)", {
+        safeAreaTopCssPx: () => {
+          throw new Error("bridge unavailable");
+        },
+      }),
+    ).not.toThrow();
+    expect(root.style.getPropertyValue("--native-safe-area-top")).toBe("");
+
+    applyRuntimeEnvironment(root, "Android; wv)", {
+      safeAreaTopCssPx: () => Number.NaN,
+    });
+    expect(root.style.getPropertyValue("--native-safe-area-top")).toBe("");
+  });
 });

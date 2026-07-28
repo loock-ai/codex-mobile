@@ -25,9 +25,12 @@
 步骤：
 
 1. 增加工作流契约断言：
-   - Android 配置显式设置 `fullScreen=false`。
+   - Android 配置显式设置 `safeArea=all`，生成结果为
+     `fullScreen=false`。
    - 生成工程后保留 `enableEdgeToEdge()`。
    - 根容器顶部 padding 改为 0，左、右、底部 inset 保留。
+   - 原生顶部 inset 通过 `JsBridge` 和 inset 变化事件提供给前端，兼容旧版
+     Android System WebView。
    - 生成的 `app.json` 必须是非全屏。
 2. 增加样式契约断言，禁止 Android WebView 把 `--safe-area-top` 强制设为 0。
 3. 运行 CI 契约测试，确认旧实现失败。

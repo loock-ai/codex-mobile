@@ -6,9 +6,29 @@ export function isAndroidWebView(userAgent: string) {
   );
 }
 
+export interface AndroidWebViewBridge {
+  safeAreaTopCssPx?: () => number;
+}
+
 export function applyRuntimeEnvironment(
   root: HTMLElement,
   userAgent: string,
+  bridge?: AndroidWebViewBridge,
 ) {
-  root.classList.toggle("android-webview", isAndroidWebView(userAgent));
+  const androidWebView = isAndroidWebView(userAgent);
+  root.classList.toggle("android-webview", androidWebView);
+  root.style.removeProperty("--native-safe-area-top");
+
+  if (!androidWebView || typeof bridge?.safeAreaTopCssPx !== "function") {
+    return;
+  }
+
+  try {
+    const safeAreaTop = bridge.safeAreaTopCssPx();
+    if (Number.isFinite(safeAreaTop) && safeAreaTop >= 0) {
+      root.style.setProperty("--native-safe-area-top", `${safeAreaTop}px`);
+    }
+  } catch {
+    // The native bridge is optional and may not be ready during early startup.
+  }
 }

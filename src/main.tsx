@@ -1,10 +1,21 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
-import { applyRuntimeEnvironment } from "./ui/runtime-environment";
+import {
+  applyRuntimeEnvironment,
+  type AndroidWebViewBridge,
+} from "./ui/runtime-environment";
 import "./styles.css";
 
-applyRuntimeEnvironment(document.documentElement, navigator.userAgent);
+const nativeBridge = (
+  window as typeof window & { JsBridge?: AndroidWebViewBridge }
+).JsBridge;
+
+applyRuntimeEnvironment(
+  document.documentElement,
+  navigator.userAgent,
+  nativeBridge,
+);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

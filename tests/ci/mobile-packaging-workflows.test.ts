@@ -109,6 +109,17 @@ describe("移动 App 内置前端流水线", () => {
     expect(hardenHost).toContain("app/src/main/assets/index.html");
     expect(hardenHost).toContain("allowed_permissions");
     expect(hardenHost).toContain('android:allowBackup="false"');
+    expect(hardenHost).toContain("enableEdgeToEdge()");
+    expect(hardenHost).toContain(
+      "view.setPadding(systemBar.left, 0, systemBar.right, systemBar.bottom)",
+    );
+    expect(hardenHost).toContain(
+      "systemBar.top / resources.displayMetrics.density.toDouble()",
+    );
+    expect(hardenHost).toContain("nativeSafeAreaTopCssPx");
+    expect(hardenHost).toContain("fun safeAreaTopCssPx(): Double");
+    expect(hardenHost).toContain("evaluateJavascript");
+    expect(hardenHost).toContain(".fullScreen == false");
     expect(verifyArtifact).toContain("apkanalyzer manifest print");
     expect(verifyArtifact).toContain(
       "DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
@@ -120,6 +131,16 @@ describe("移动 App 内置前端流水线", () => {
       'node "$RUNNER_TEMP/scan-mobile-assets.cjs" "$unpacked_assets/assets"',
     );
     expect(source).toContain(".android.isHtml = true");
+    expect(source).toContain('.android.safeArea = "all"');
+    expect(readProjectFile("src/styles.css")).not.toContain(
+      "html.android-webview { --safe-area-top: 0px; }",
+    );
+    expect(readProjectFile("src/styles.css")).toContain(
+      "--native-safe-area-top: 0px",
+    );
+    expect(readProjectFile("src/styles.css")).toContain(
+      "--safe-area-top: max(env(safe-area-inset-top, 0px), var(--native-safe-area-top))",
+    );
     expect(source).toContain("vip.loock.codexmobile");
     expect(source).not.toContain("matrix:");
     expect(source).not.toContain("page_url");
