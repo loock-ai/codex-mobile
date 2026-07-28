@@ -10,6 +10,66 @@ export type RemoteFileTarget = {
   column: number | null;
 };
 
+const gitDirectivePattern =
+  /^\s*::git-[a-z0-9-]+\{[^\r\n]*\}\s*$/i;
+
+export type AutomationHeartbeat = {
+  automationId: string;
+  instructions: string | null;
+  message: string | null;
+};
+
+function heartbeatField(source: string, name: string) {
+  const match = source.match(
+    new RegExp(`<${name}>\\s*([\\s\\S]*?)\\s*</${name}>`, "i"),
+  );
+  const value = match?.[1]?.trim();
+  return value || null;
+}
+
+export function parseAutomationHeartbeat(
+  text: string,
+): AutomationHeartbeat | null {
+  const envelope = text
+    .trim()
+    .match(/^<heartbeat>\s*([\s\S]*?)\s*<\/heartbeat>$/i);
+  if (!envelope) return null;
+  const automationId = heartbeatField(envelope[1], "automation_id");
+  if (!automationId) return null;
+  return {
+    automationId,
+    instructions: heartbeatField(envelope[1], "instructions"),
+    message: heartbeatField(envelope[1], "message"),
+  };
+}
+
+export function stripGitDirectives(text: string) {
+  const visibleLines: string[] = [];
+  let fenceMarker = "";
+  let fenceLength = 0;
+
+  for (const line of text.split(/\r?\n/)) {
+    const fence = line.match(/^\s*(`{3,}|~{3,})/);
+    if (fence) {
+      const marker = fence[1][0];
+      if (!fenceMarker) {
+        fenceMarker = marker;
+        fenceLength = fence[1].length;
+      } else if (marker === fenceMarker && fence[1].length >= fenceLength) {
+        fenceMarker = "";
+        fenceLength = 0;
+      }
+      visibleLines.push(line);
+      continue;
+    }
+    if (!fenceMarker && gitDirectivePattern.test(line)) continue;
+    visibleLines.push(line);
+  }
+
+  while (visibleLines.at(-1)?.trim() === "") visibleLines.pop();
+  return visibleLines.join("\n");
+}
+
 const remoteFileRoots = [
   "/Users/",
   "/home/",

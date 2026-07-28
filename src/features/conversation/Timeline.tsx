@@ -5,8 +5,10 @@ import {
   groupTurnItems,
   imageSourcesForItem,
   MarkdownMessage,
+  parseAutomationHeartbeat,
   shouldCollapseUserMessage,
   splitCompletedTurnResponses,
+  stripGitDirectives,
   summarizeToolActivity,
   toolActivityRowLabel,
   type ImageSource,
@@ -64,11 +66,13 @@ function UserBubble({
   item: AnyRecord;
   client: AppServerClient | null;
 }) {
-  const text = itemText(item);
+  const rawText = itemText(item);
+  const heartbeat = parseAutomationHeartbeat(rawText);
+  const text = heartbeat?.instructions ?? rawText;
   const images = imageSourcesForItem(item);
   const collapsible = shouldCollapseUserMessage(text);
   const [expanded, setExpanded] = useState(false);
-  return (
+  const bubble = (
     <div className="user-bubble">
       {text && (
         <div
@@ -100,6 +104,15 @@ function UserBubble({
           <Chevron direction={expanded ? "up" : "down"} />
         </button>
       )}
+    </div>
+  );
+  if (!heartbeat) return bubble;
+  return (
+    <div className="automation-user-message">
+      <small className="automation-message-label">
+        通过自动化功能发送
+      </small>
+      {bubble}
     </div>
   );
 }
@@ -167,18 +180,25 @@ function TimelineItem({
   client: AppServerClient | null;
 }) {
   const type = String(item.type ?? "");
-  const text = itemText(item);
+  const rawText = itemText(item);
+  const heartbeat = type === "agentMessage"
+    ? parseAutomationHeartbeat(rawText)
+    : null;
+  const text = heartbeat?.message ?? rawText;
   if (!text && !type) return null;
   if (type === "userMessage") return <UserBubble item={item} client={client} />;
+  const displayText = type === "agentMessage"
+    ? stripGitDirectives(text)
+    : text;
   const images = imageSourcesForItem(item);
   if (images.length) return <ImageGallery images={images} client={client} />;
   if (/reasoning/i.test(type)) {
-    return text ? <div className="reasoning">{text}</div> : null;
+    return displayText ? <div className="reasoning">{displayText}</div> : null;
   }
-  return text ? (
+  return displayText ? (
     <div className="assistant-message">
       <MarkdownMessage
-        text={text}
+        text={displayText}
         renderImage={(source, alt) => (
           <RemoteImage
             image={{

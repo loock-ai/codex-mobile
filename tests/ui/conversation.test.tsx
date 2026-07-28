@@ -18,12 +18,14 @@ import {
   groupTurnItems,
   imageSourcesForItem,
   isThreadRunning,
+  parseAutomationHeartbeat,
   parseRemoteFileHref,
   relativeTime,
   removePendingTurn,
   parseUnifiedDiff,
   shouldCollapseUserMessage,
   splitCompletedTurnResponses,
+  stripGitDirectives,
   summarizeToolActivity,
   summarizeFileChange,
   toolActivityRowLabel,
@@ -691,6 +693,165 @@ describe("移动端对话格式", () => {
     expect(screen.getByText("加粗").tagName).toBe("STRONG");
     expect(screen.getByText("第一项").tagName).toBe("LI");
     expect(document.querySelector("script")).toBeNull();
+  });
+
+  it("从 AI 正文中移除独立成行的 Git 界面指令", () => {
+    expect(
+      stripGitDirectives(
+        [
+          "部署已经完成。",
+          "",
+          '::git-create-branch{cwd="/tmp/project" branch="codex/android"}',
+          '::git-commit{cwd="/tmp/project"}',
+          '::git-push{cwd="/tmp/project" branch="codex/android"}',
+          "",
+        ].join("\n"),
+      ),
+    ).toBe("部署已经完成。");
+  });
+
+  it("保留正文内和 Markdown 代码块内的 Git 指令示例", () => {
+    const text = [
+      "正文内的 ::git-commit 不应隐藏。",
+      "",
+      "```text",
+      '::git-commit{cwd="/tmp/project"}',
+      "```",
+    ].join("\n");
+
+    expect(stripGitDirectives(text)).toBe(text);
+  });
+
+  it("只在 AI 消息展示层隐藏 Git 指令", () => {
+    render(
+      <TurnCard
+        client={null}
+        turn={{
+          id: "turn-git-directives",
+          status: "completed",
+          items: [
+            {
+              id: "user-git-example",
+              type: "userMessage",
+              text: '请解释 ::git-commit{cwd="/tmp/project"}',
+            },
+            {
+              id: "assistant-final",
+              type: "agentMessage",
+              phase: "final_answer",
+              text: [
+                "部署已经完成。",
+                "",
+                '::git-commit{cwd="/tmp/project"}',
+              ].join("\n"),
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("部署已经完成。")).not.toBeNull();
+    expect(screen.getAllByText(/::git-commit/)).toHaveLength(1);
+    expect(screen.getByText(/请解释 ::git-commit/)).not.toBeNull();
+  });
+
+  it("解析自动化 heartbeat 的用户指令和 AI 正文", () => {
+    expect(
+      parseAutomationHeartbeat(
+        [
+          "<heartbeat>",
+          "<automation_id>automation-2</automation_id>",
+          "<current_time_iso>2026-07-28T00:30:41.115Z</current_time_iso>",
+          "<instructions>每天整理 Agent 开发动态。</instructions>",
+          "</heartbeat>",
+        ].join("\n"),
+      ),
+    ).toEqual({
+      automationId: "automation-2",
+      instructions: "每天整理 Agent 开发动态。",
+      message: null,
+    });
+    expect(
+      parseAutomationHeartbeat(
+        [
+          "<heartbeat>",
+          "<automation_id>automation-2</automation_id>",
+          "<decision>NOTIFY</decision>",
+          "<message>趋势观察已完成。</message>",
+          "</heartbeat>",
+        ].join("\n"),
+      ),
+    ).toEqual({
+      automationId: "automation-2",
+      instructions: null,
+      message: "趋势观察已完成。",
+    });
+  });
+
+  it("不解析普通正文、代码示例和缺少自动化 ID 的 heartbeat", () => {
+    expect(
+      parseAutomationHeartbeat(
+        "正文中的 <heartbeat> 只是普通文字。",
+      ),
+    ).toBeNull();
+    expect(
+      parseAutomationHeartbeat(
+        "```xml\n<heartbeat><automation_id>a</automation_id></heartbeat>\n```",
+      ),
+    ).toBeNull();
+    expect(
+      parseAutomationHeartbeat(
+        "<heartbeat><message>普通消息</message></heartbeat>",
+      ),
+    ).toBeNull();
+  });
+
+  it("自动化用户和 AI 消息只显示对应正文", () => {
+    const { container } = render(
+      <TurnCard
+        client={null}
+        turn={{
+          id: "turn-automation",
+          status: "completed",
+          items: [
+            {
+              id: "automation-user",
+              type: "userMessage",
+              text: [
+                "<heartbeat>",
+                "<automation_id>automation-2</automation_id>",
+                "<current_time_iso>2026-07-28T00:30:41.115Z</current_time_iso>",
+                "<instructions>每天整理 Agent 开发动态。</instructions>",
+                "</heartbeat>",
+              ].join("\n"),
+            },
+            {
+              id: "automation-assistant",
+              type: "agentMessage",
+              phase: "final_answer",
+              text: [
+                "<heartbeat>",
+                "<automation_id>automation-2</automation_id>",
+                "<decision>NOTIFY</decision>",
+                "<message>趋势观察已完成。</message>",
+                "</heartbeat>",
+              ].join("\n"),
+            },
+          ],
+        }}
+      />,
+    );
+
+    const automationLabel = screen.getByText("通过自动化功能发送");
+    expect(screen.getAllByText("通过自动化功能发送")).toHaveLength(1);
+    expect(
+      automationLabel.nextElementSibling?.classList.contains("user-bubble"),
+    ).toBe(true);
+    expect(screen.getByText("每天整理 Agent 开发动态。")).not.toBeNull();
+    expect(screen.getByText("趋势观察已完成。")).not.toBeNull();
+    expect(container.textContent).not.toContain("<heartbeat>");
+    expect(container.textContent).not.toContain("automation-2");
+    expect(container.textContent).not.toContain("NOTIFY");
   });
 
   it("Markdown 渲染器允许用户气泡添加紧凑样式 class", () => {
