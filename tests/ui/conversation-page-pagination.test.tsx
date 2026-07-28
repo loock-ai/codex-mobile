@@ -58,6 +58,19 @@ function renderConversation(
 }
 
 describe("会话详情历史分页", () => {
+  it("右上角两个操作入口位于同一个按钮组", () => {
+    const { container } = renderConversation("exhausted");
+    const view = within(container);
+    const group = view.getByRole("group", { name: "会话详情操作" });
+
+    expect(
+      within(group).getByRole("button", { name: "查看上下文占用情况" }),
+    ).not.toBeNull();
+    expect(
+      within(group).getByRole("button", { name: "会话操作" }),
+    ).not.toBeNull();
+  });
+
   it("用户上滑后不显示悬浮回到底部按钮", () => {
     const { container } = renderConversation("exhausted");
     const scroller = container.querySelector(".conversation-scroll");

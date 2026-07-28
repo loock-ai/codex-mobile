@@ -161,7 +161,11 @@ export function ConversationPage({
           </span>
         </div>
         {!!active.id && (
-          <div className="conversation-header-actions">
+          <div
+            className="conversation-header-actions"
+            role="group"
+            aria-label="会话详情操作"
+          >
             <ContextUsageButton
               tokenUsage={tokenUsage}
               onClick={() => {
