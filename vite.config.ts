@@ -3,6 +3,7 @@ import { defineConfig } from "vitest/config";
 import { viteDevServerConfig } from "./server/dev-mode.js";
 
 export default defineConfig({
+  base: "./",
   plugins: [react()],
   server: viteDevServerConfig,
   build: {

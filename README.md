@@ -46,6 +46,24 @@ CODEX_MOBILE_TOKEN='<随机口令>' npm start
 手机访问 `http://<Mac局域网IP>:4173/?token=<随机口令>`。口令仅作为轻量局域网
 保护；跨不可信网络应在前面增加 HTTPS 和正式认证。
 
+## 内置移动 App
+
+GitHub Actions 提供 Android 和 iOS 打包流水线。流水线先构建当前仓库的
+`dist/`，再将静态资源内置到一个通用的 `Codex Mobile` App；App 不包含固定后端
+地址或访问口令。
+
+App 首次启动会直接打开“添加设备”表单。用户输入完整网关地址，例如
+`http://mac-mini.local:4173/?token=<访问口令>`，验证成功后保存在 App 的本地
+存储中。
+
+后端可以继续提供 Web 页面，也可以设置
+`CODEX_MOBILE_SERVE_STATIC=false` 以 `gateway-only` 模式运行。内置页面可能向
+网关发送 `Origin: null`；确认实际设备行为后，可将 `null` 加入现有
+`CODEX_MOBILE_ALLOWED_ORIGINS` 白名单。非回环监听仍应保留访问口令。
+
+Android 流水线生成可测试的 APK。iOS 流水线当前生成未签名 IPA；安装到普通
+iPhone 或上传 TestFlight 前仍需使用 Apple Developer 证书签名。
+
 ### 多设备调试模式
 
 前端会在浏览器 `localStorage` 中保存最多 8 个设备网关，并同时连接所有已启用

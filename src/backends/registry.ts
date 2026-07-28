@@ -88,6 +88,30 @@ export function createDefaultBackendRegistry(
   };
 }
 
+function createInitialBackendRegistry(
+  origin: string,
+  token = "",
+): BackendRegistry {
+  let url: URL;
+  try {
+    url = new URL(origin.trim());
+  } catch {
+    return {
+      version: 1,
+      selectedBackendId: "",
+      backends: [],
+    };
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return {
+      version: 1,
+      selectedBackendId: "",
+      backends: [],
+    };
+  }
+  return createDefaultBackendRegistry(origin, token);
+}
+
 function normalizedBackends(value: unknown) {
   if (!Array.isArray(value)) return [];
   const seenIds = new Set<string>();
@@ -188,11 +212,11 @@ function normalizedRegistry(
   origin: string,
 ): BackendRegistry {
   if (!value || typeof value !== "object") {
-    return createDefaultBackendRegistry(origin);
+    return createInitialBackendRegistry(origin);
   }
   const source = value as Partial<BackendRegistry>;
   let backends = normalizedBackends(source.backends);
-  if (!backends.length) return createDefaultBackendRegistry(origin);
+  if (!backends.length) return createInitialBackendRegistry(origin);
   if (!backends.some((backend) => backend.enabled)) {
     backends = backends.map((backend, index) =>
       index === 0 ? { ...backend, enabled: true } : backend,
@@ -220,11 +244,11 @@ export function loadBackendRegistry(
   fallbackToken = "",
 ): BackendRegistry {
   const stored = storage.getItem(BACKEND_REGISTRY_STORAGE_KEY);
-  if (!stored) return createDefaultBackendRegistry(origin, fallbackToken);
+  if (!stored) return createInitialBackendRegistry(origin, fallbackToken);
   try {
     return normalizedRegistry(JSON.parse(stored), origin);
   } catch {
-    return createDefaultBackendRegistry(origin, fallbackToken);
+    return createInitialBackendRegistry(origin, fallbackToken);
   }
 }
 
@@ -232,8 +256,18 @@ export function saveBackendRegistry(
   storage: Storage,
   registry: BackendRegistry,
 ) {
-  const fallbackOrigin =
-    registry.backends[0]?.baseUrl || "http://127.0.0.1";
+  if (!registry.backends.length) {
+    storage.setItem(
+      BACKEND_REGISTRY_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        selectedBackendId: "",
+        backends: [],
+      }),
+    );
+    return;
+  }
+  const fallbackOrigin = registry.backends[0].baseUrl;
   storage.setItem(
     BACKEND_REGISTRY_STORAGE_KEY,
     JSON.stringify(normalizedRegistry(registry, fallbackOrigin)),

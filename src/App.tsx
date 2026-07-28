@@ -1548,16 +1548,68 @@ function BackendWorkspace({
 }
 
 export function App() {
-  const [registry, setRegistry] = useState<BackendRegistry>(() => {
+  const [initialRegistry] = useState<BackendRegistry>(() => {
     const token = new URLSearchParams(window.location.search).get("token") ?? "";
     const initial = loadBackendRegistry(
       window.localStorage,
       window.location.origin,
       token,
     );
-    saveBackendRegistry(window.localStorage, initial);
+    if (initial.backends.length) {
+      saveBackendRegistry(window.localStorage, initial);
+    }
     return initial;
   });
+  return <AppBootstrap initialRegistry={initialRegistry} />;
+}
+
+export function AppBootstrap({
+  initialRegistry,
+}: {
+  initialRegistry: BackendRegistry;
+}) {
+  const [registry, setRegistry] = useState(initialRegistry);
+  const [managerOpen, setManagerOpen] = useState(
+    !initialRegistry.backends.length,
+  );
+
+  if (registry.backends.length) {
+    return <ConfiguredApp initialRegistry={registry} />;
+  }
+
+  return (
+    <main className="app-shell">
+      <section className="empty-state">
+        <h1>Codex Mobile</h1>
+        <p>添加设备后即可连接 Codex。</p>
+        <button
+          className="backend-add-device"
+          type="button"
+          onClick={() => setManagerOpen(true)}
+        >
+          添加设备
+        </button>
+      </section>
+      <BackendManagerSheet
+        open={managerOpen}
+        registry={registry}
+        summaries={{}}
+        onChange={(next) => {
+          saveBackendRegistry(window.localStorage, next);
+          setRegistry(next);
+        }}
+        onClose={() => setManagerOpen(false)}
+      />
+    </main>
+  );
+}
+
+function ConfiguredApp({
+  initialRegistry,
+}: {
+  initialRegistry: BackendRegistry;
+}) {
+  const [registry, setRegistry] = useState(initialRegistry);
   const [summaries, setSummaries] = useState<
     Record<string, BackendRuntimeSummary>
   >({});

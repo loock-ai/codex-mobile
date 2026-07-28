@@ -72,6 +72,46 @@ describe("多后端配置存储", () => {
     ).toBe("legacy-token");
   });
 
+  it.each(["null", "file:///app/index.html", "about:blank", "app://local"])(
+    "内置页面来源 %s 首次打开时保持空后端",
+    (origin) => {
+      const storage = new MemoryStorage();
+
+      expect(loadBackendRegistry(storage, origin)).toEqual({
+        version: 1,
+        selectedBackendId: "",
+        backends: [],
+      });
+    },
+  );
+
+  it("HTTP 来源格式错误时仍报告配置错误", () => {
+    const storage = new MemoryStorage();
+
+    expect(() =>
+      loadBackendRegistry(storage, "http://gateway.local:4173/not-origin"),
+    ).toThrow("不能包含路径");
+  });
+
+  it("损坏缓存按来源恢复为 Web 默认后端或内置页空后端", () => {
+    const webStorage = new MemoryStorage();
+    webStorage.setItem(BACKEND_REGISTRY_STORAGE_KEY, "{");
+    expect(
+      loadBackendRegistry(webStorage, "https://gateway.example"),
+    ).toMatchObject({
+      selectedBackendId: "current-origin",
+      backends: [{ baseUrl: "https://gateway.example" }],
+    });
+
+    const appStorage = new MemoryStorage();
+    appStorage.setItem(BACKEND_REGISTRY_STORAGE_KEY, "{");
+    expect(loadBackendRegistry(appStorage, "null")).toEqual({
+      version: 1,
+      selectedBackendId: "",
+      backends: [],
+    });
+  });
+
   it("规范化 HTTP 地址并拒绝不支持的协议和路径", () => {
     expect(normalizeBackendBaseUrl(" HTTP://Mac-Mini.Local:4173/ ")).toBe(
       "http://mac-mini.local:4173",

@@ -54,7 +54,9 @@ export function BackendManagerSheet({
   onClose: () => void;
   probe?: (backend: BackendConfig) => Promise<GatewayHostInfo>;
 }) {
-  const [draft, setDraft] = useState<BackendDraft | null>(null);
+  const [draft, setDraft] = useState<BackendDraft | null>(() =>
+    open && !registry.backends.length ? newBackendDraft(0) : null,
+  );
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState("");
 
@@ -63,8 +65,10 @@ export function BackendManagerSheet({
       setDraft(null);
       setError("");
       setTesting(false);
+    } else if (!registry.backends.length) {
+      setDraft((current) => current ?? newBackendDraft(0));
     }
-  }, [open]);
+  }, [open, registry.backends.length]);
 
   if (!open) return null;
 
@@ -155,7 +159,7 @@ export function BackendManagerSheet({
                 aria-label="网关地址"
                 inputMode="url"
                 value={draft.gatewayUrl}
-                placeholder="http://192.168.100.8:4173/?token=xxx"
+                placeholder="http://host.local:4173/?token=xxx"
                 onChange={(event) =>
                   setDraft({ ...draft, gatewayUrl: event.target.value })
                 }

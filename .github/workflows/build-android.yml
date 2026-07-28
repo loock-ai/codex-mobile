@@ -1,44 +1,28 @@
-name: Build Android APKs
+name: Build Android App
 
 on:
   workflow_dispatch:
-    inputs:
-      codex_mini_page_url:
-        description: CodexMini page URL
-        required: true
-        type: string
-        default: http://192.168.100.8:4173/
-      codex_macbook_page_url:
-        description: CodexMacBook page URL
-        required: true
-        type: string
-        default: http://192.168.100.35:4173/
 
 permissions:
   contents: read
 
+env:
+  APP_NAME: CodexMobile
+  DISPLAY_NAME: Codex Mobile
+  APP_ID: vip.loock.codexmobile
+  APP_VERSION: "1.0.0"
+
 jobs:
   build:
-    name: Build ${{ matrix.app_name }}
+    name: Build Codex Mobile Android
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - app_name: CodexMini
-            package_name: vip.loock.codexmini
-            version: "1.0.0"
-            description: Codex Remote Mac mini LAN Android client
-            page_url: ${{ inputs.codex_mini_page_url }}
-          - app_name: CodexMacBook
-            package_name: vip.loock.codexmacbook
-            version: "1.0.0"
-            description: Codex Remote MacBook LAN Android client
-            page_url: ${{ inputs.codex_macbook_page_url }}
-    env:
-      PAGE_URL: ${{ matrix.page_url }}
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Checkout pinned PakePlus Android
         uses: actions/checkout@v4
         with:
@@ -47,17 +31,123 @@ jobs:
           path: pakeplus
           persist-credentials: false
 
-      - name: Validate page URL
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Build embedded frontend
         shell: bash
         run: |
           set -euo pipefail
-          case "$PAGE_URL" in
-            http://*|https://*) ;;
-            *)
-              echo "::error::PAGE_URL must start with http:// or https://"
-              exit 1
-              ;;
-          esac
+          npm ci
+          npm run build
+          test -s dist/index.html
+          grep -Eq '(src|href)="\./assets/' dist/index.html
+          cat > "$RUNNER_TEMP/scan-mobile-assets.cjs" <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+
+          const allowedUrlPrefixes = [
+            "http://www.apple.com/DTDs/",
+            "http://www.w3.org/",
+            "https://github.com/remarkjs/",
+            "https://github.com/syntax-tree/",
+            "https://react.dev/errors/",
+          ];
+          const allowedUrls = new Set([
+            "http://host.local:4173/?token=xxx",
+            "https://www.pakeplus.com/",
+          ]);
+          const endpointPatterns = [
+            [
+              "private or link-local IPv4",
+              /(^|[^0-9])((10|127)\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|169\.254\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3})(?=[:/"'\s]|$)/gi,
+            ],
+            [
+              "loopback, unique-local, or link-local IPv6",
+              /\[(::1|f[cd][0-9a-f:]*|fe[89ab][0-9a-f:]*)\](?=[:/"'\s]|$)/gi,
+            ],
+            [
+              "localhost",
+              /(https?|wss?):\/\/localhost(?=[:/]|$)/gi,
+            ],
+          ];
+          const credentialPatterns = [
+            [
+              "query credential",
+              /[?&](token|access_token|api[_-]?key|secret|password)=[A-Za-z0-9._~+/%=-]{8,}/gi,
+            ],
+            [
+              "assigned credential",
+              /["']?(token|authorization|api[_-]?key|secret|password)["']?\s*[:=]\s*["'][^"'\s]{8,}["']/gi,
+            ],
+            [
+              "bearer credential",
+              /\bbearer\s+[A-Za-z0-9._~+\/=-]{12,}/gi,
+            ],
+            [
+              "CODEX_MOBILE_TOKEN credential",
+              /CODEX_MOBILE_TOKEN\s*=\s*["']?[A-Za-z0-9._~+\/=-]{8,}/g,
+            ],
+          ];
+          const urlPattern = /(?:https?|wss?):\/\/[^\s"'`<>\\]+/g;
+          const textExtensions = new Set([
+            ".css", ".html", ".js", ".json", ".map", ".plist", ".strings",
+            ".svg", ".txt", ".xml",
+          ]);
+
+          function collect(target) {
+            const stat = fs.statSync(target);
+            if (stat.isDirectory()) {
+              return fs.readdirSync(target).flatMap((entry) =>
+                collect(path.join(target, entry))
+              );
+            }
+            return textExtensions.has(path.extname(target).toLowerCase())
+              ? [target]
+              : [];
+          }
+
+          const files = process.argv.slice(2).flatMap(collect);
+          if (files.length === 0) {
+            throw new Error("No text assets were found to scan");
+          }
+          const findings = [];
+          for (const file of files) {
+            const source = fs.readFileSync(file, "utf8");
+            for (const [label, pattern] of [
+              ...endpointPatterns,
+              ...credentialPatterns,
+            ]) {
+              for (const match of source.matchAll(pattern)) {
+                findings.push(`${file}: ${label}: ${match[0].slice(0, 160)}`);
+              }
+            }
+            for (const match of source.matchAll(urlPattern)) {
+              const url = match[0];
+              if (
+                !allowedUrls.has(url)
+                && !allowedUrlPrefixes.some((prefix) => url.startsWith(prefix))
+              ) {
+                findings.push(`${file}: unexpected fixed URL: ${url.slice(0, 160)}`);
+              }
+            }
+          }
+          if (findings.length > 0) {
+            console.error(findings.join("\n"));
+            process.exit(1);
+          }
+          NODE
+          node "$RUNNER_TEMP/scan-mobile-assets.cjs" dist
+          cp -R dist/. pakeplus/scripts/www/
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -72,18 +162,6 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22.14.0
-          cache: pnpm
-          cache-dependency-path: pakeplus/pnpm-lock.yaml
-
       - name: Install ImageMagick
         shell: bash
         run: |
@@ -92,57 +170,44 @@ jobs:
           sudo apt-get install --yes imagemagick
           convert --version
 
-      - name: Configure PakePlus
+      - name: Configure PakePlus for embedded HTML
         working-directory: pakeplus
         shell: bash
         run: |
           set -euo pipefail
           jq \
-            --arg name "${{ matrix.app_name }}" \
-            --arg appid "${{ matrix.package_name }}" \
-            --arg version "${{ matrix.version }}" \
-            --arg url "$PAGE_URL" \
-            --arg description "${{ matrix.description }}" \
+            --arg name "$APP_NAME" \
+            --arg displayName "$DISPLAY_NAME" \
+            --arg appid "$APP_ID" \
+            --arg version "$APP_VERSION" \
             '
               .name = $name
-              | .url = $url
-              | .showName = $name
+              | .url = ""
+              | .showName = $displayName
               | .appid = $appid
               | .version = $version
-              | .desc = $description
+              | .desc = "Codex Mobile"
+              | .isHtml = true
               | .android.name = $name
-              | .android.showName = $name
+              | .android.showName = $displayName
               | .android.id = $appid
               | .android.version = $version
-              | .android.webUrl = $url
-              | .android.desc = $description
-              | .android.pubBody = ($name + " v" + $version + " LAN client")
-              | .android.isHtml = false
+              | .android.webUrl = ""
+              | .android.desc = "Codex Mobile"
+              | .android.pubBody = ($displayName + " v" + $version)
+              | .android.isHtml = true
               | .android.debug = false
               | .phone.internet = true
-            ' scripts/ppconfig.json > "$RUNNER_TEMP/ppconfig.json"
-          mv "$RUNNER_TEMP/ppconfig.json" scripts/ppconfig.json
-
-      - name: Test generated PakePlus config
-        working-directory: pakeplus
-        shell: bash
-        run: |
-          set -euo pipefail
+            ' scripts/ppconfig.json > "$RUNNER_TEMP/ppconfig-android.json"
+          mv "$RUNNER_TEMP/ppconfig-android.json" scripts/ppconfig.json
           jq -e \
-            --arg name "${{ matrix.app_name }}" \
-            --arg appid "${{ matrix.package_name }}" \
-            --arg version "${{ matrix.version }}" \
-            --arg url "$PAGE_URL" \
+            --arg appid "$APP_ID" \
+            --arg version "$APP_VERSION" \
             '
-              .name == $name
-              and .url == $url
-              and .appid == $appid
-              and .android.name == $name
-              and .android.showName == $name
-              and .android.id == $appid
+              .android.id == $appid
               and .android.version == $version
-              and .android.webUrl == $url
-              and .android.isHtml == false
+              and .android.isHtml == true
+              and .android.webUrl == ""
               and .phone.internet == true
             ' scripts/ppconfig.json > /dev/null
           grep -Fq 'android:usesCleartextTraffic="true"' \
@@ -152,22 +217,63 @@ jobs:
         working-directory: pakeplus
         run: pnpm install --frozen-lockfile
 
-      - name: Generate Android project config
+      - name: Generate Android project
         working-directory: pakeplus
         run: pnpm pp:worker
 
-      - name: Test generated Android project
+      - name: Harden and test embedded Android project
         working-directory: pakeplus
         shell: bash
         run: |
           set -euo pipefail
-          jq -e --arg url "$PAGE_URL" \
-            '.webUrl == $url and .internet == true' \
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          manifest_path = Path("app/src/main/AndroidManifest.xml")
+          android = "http://schemas.android.com/apk/res/android"
+          tools = "http://schemas.android.com/tools"
+          ET.register_namespace("android", android)
+          ET.register_namespace("tools", tools)
+          tree = ET.parse(manifest_path)
+          root = tree.getroot()
+          allowed_permissions = {
+              "android.permission.INTERNET",
+              "android.permission.ACCESS_NETWORK_STATE",
+          }
+          for child in list(root):
+              if child.tag == "uses-permission":
+                  name = child.get(f"{{{android}}}name", "")
+                  if name not in allowed_permissions:
+                      root.remove(child)
+              elif child.tag in {"uses-feature", "queries"}:
+                  root.remove(child)
+          application = root.find("application")
+          if application is None:
+              raise SystemExit("Android application element is missing")
+          application.set(f"{{{android}}}allowBackup", "false")
+          application.attrib.pop(f"{{{android}}}dataExtractionRules", None)
+          application.attrib.pop(f"{{{android}}}fullBackupContent", None)
+          tree.write(manifest_path, encoding="utf-8", xml_declaration=True)
+          for unused_asset in ("vConsole.js", "pppwd.html"):
+              Path("app/src/main/assets", unused_asset).unlink(missing_ok=True)
+          PY
+          test -s app/src/main/assets/index.html
+          find app/src/main/assets/assets -type f -name '*.js' -print -quit \
+            | grep -q .
+          jq -e \
+            '.webUrl == "file:///android_asset/index.html" and .internet == true' \
             app/src/main/assets/app.json > /dev/null
-          grep -Fq 'applicationId = "${{ matrix.package_name }}"' \
-            app/build.gradle.kts
-          grep -Fq 'versionName = "${{ matrix.version }}"' \
-            app/build.gradle.kts
+          grep -Fq "applicationId = \"$APP_ID\"" app/build.gradle.kts
+          grep -Fq "versionName = \"$APP_VERSION\"" app/build.gradle.kts
+          grep -Fq 'android:allowBackup="false"' app/src/main/AndroidManifest.xml
+          if grep -Eq \
+            'ACCESS_(FINE|COARSE)_LOCATION|CAMERA|RECORD_AUDIO|EXTERNAL_STORAGE|READ_MEDIA|SYSTEM_ALERT_WINDOW|dataExtractionRules|fullBackupContent' \
+            app/src/main/AndroidManifest.xml; then
+            echo "::error::Android manifest contains an unnecessary capability"
+            exit 1
+          fi
+          node "$RUNNER_TEMP/scan-mobile-assets.cjs" app/src/main/assets
           test -s pakeplus.keystore
 
       - name: Build debug APK
@@ -178,21 +284,51 @@ jobs:
           chmod +x ./gradlew
           ./gradlew assembleDebug --no-daemon
 
-      - name: Prepare APK artifact
+      - name: Prepare and verify APK
         working-directory: pakeplus
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/apk"
-          cp app/build/outputs/apk/debug/app-debug.apk \
-            "$RUNNER_TEMP/apk/${{ matrix.app_name }}-v${{ matrix.version }}.apk"
-          test -s \
-            "$RUNNER_TEMP/apk/${{ matrix.app_name }}-v${{ matrix.version }}.apk"
+          artifact="$RUNNER_TEMP/apk/CodexMobile-v${APP_VERSION}.apk"
+          listing="$RUNNER_TEMP/apk/CodexMobile-contents.txt"
+          final_manifest="$RUNNER_TEMP/apk/CodexMobile-manifest.xml"
+          unpacked_assets="$RUNNER_TEMP/apk/CodexMobile-unpacked-assets"
+          cp app/build/outputs/apk/debug/app-debug.apk "$artifact"
+          test -s "$artifact"
+          unzip -l "$artifact" > "$listing"
+          grep -Fq 'assets/index.html' "$listing"
+          grep -Eq 'assets/assets/.+\.js' "$listing"
+          apkanalyzer manifest print "$artifact" > "$final_manifest"
+          python3 - "$final_manifest" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          android = "http://schemas.android.com/apk/res/android"
+          root = ET.parse(sys.argv[1]).getroot()
+          permissions = {
+              element.get(f"{{{android}}}name", "")
+              for element in root.findall("uses-permission")
+          }
+          allowed_permissions = {
+              "android.permission.INTERNET",
+              "android.permission.ACCESS_NETWORK_STATE",
+          }
+          if permissions != allowed_permissions:
+              raise SystemExit(f"Unexpected final APK permissions: {sorted(permissions)}")
+          application = root.find("application")
+          if application is None or application.get(f"{{{android}}}allowBackup") != "false":
+              raise SystemExit("Final APK must disable application backup")
+          PY
+          mkdir -p "$unpacked_assets"
+          unzip -q "$artifact" 'assets/*' -d "$unpacked_assets"
+          node "$RUNNER_TEMP/scan-mobile-assets.cjs" "$unpacked_assets/assets"
+          sha256sum "$artifact"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.app_name }}-android
-          path: ${{ runner.temp }}/apk/${{ matrix.app_name }}-v${{ matrix.version }}.apk
+          name: CodexMobile-android
+          path: ${{ runner.temp }}/apk/CodexMobile-v${{ env.APP_VERSION }}.apk
           if-no-files-found: error
           retention-days: 7

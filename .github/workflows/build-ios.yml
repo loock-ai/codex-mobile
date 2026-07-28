@@ -1,0 +1,365 @@
+name: Build iOS App
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  APP_NAME: CodexMobile
+  DISPLAY_NAME: Codex Mobile
+  APP_ID: vip.loock.codexmobile
+  APP_VERSION: "1.0.0"
+
+jobs:
+  build:
+    name: Build Codex Mobile iOS
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout pinned PakePlus iOS
+        uses: actions/checkout@v4
+        with:
+          repository: Sjj1024/PakePlus-iOS
+          ref: 4be7575f47f24e0d8b4be499371da47b7d850ae7
+          path: pakeplus
+          persist-credentials: false
+
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Build embedded frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+          test -s dist/index.html
+          grep -Eq '(src|href)="\./assets/' dist/index.html
+          cat > "$RUNNER_TEMP/scan-mobile-assets.cjs" <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+
+          const allowedUrlPrefixes = [
+            "http://www.apple.com/DTDs/",
+            "http://www.w3.org/",
+            "https://github.com/remarkjs/",
+            "https://github.com/syntax-tree/",
+            "https://react.dev/errors/",
+          ];
+          const allowedUrls = new Set([
+            "http://host.local:4173/?token=xxx",
+            "https://www.pakeplus.com/",
+          ]);
+          const endpointPatterns = [
+            [
+              "private or link-local IPv4",
+              /(^|[^0-9])((10|127)\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|169\.254\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3})(?=[:/"'\s]|$)/gi,
+            ],
+            [
+              "loopback, unique-local, or link-local IPv6",
+              /\[(::1|f[cd][0-9a-f:]*|fe[89ab][0-9a-f:]*)\](?=[:/"'\s]|$)/gi,
+            ],
+            [
+              "localhost",
+              /(https?|wss?):\/\/localhost(?=[:/]|$)/gi,
+            ],
+          ];
+          const credentialPatterns = [
+            [
+              "query credential",
+              /[?&](token|access_token|api[_-]?key|secret|password)=[A-Za-z0-9._~+/%=-]{8,}/gi,
+            ],
+            [
+              "assigned credential",
+              /["']?(token|authorization|api[_-]?key|secret|password)["']?\s*[:=]\s*["'][^"'\s]{8,}["']/gi,
+            ],
+            [
+              "bearer credential",
+              /\bbearer\s+[A-Za-z0-9._~+\/=-]{12,}/gi,
+            ],
+            [
+              "CODEX_MOBILE_TOKEN credential",
+              /CODEX_MOBILE_TOKEN\s*=\s*["']?[A-Za-z0-9._~+\/=-]{8,}/g,
+            ],
+          ];
+          const urlPattern = /(?:https?|wss?):\/\/[^\s"'`<>\\]+/g;
+          const textExtensions = new Set([
+            ".css", ".html", ".js", ".json", ".map", ".plist", ".strings",
+            ".svg", ".txt", ".xml",
+          ]);
+
+          function collect(target) {
+            const stat = fs.statSync(target);
+            if (stat.isDirectory()) {
+              return fs.readdirSync(target).flatMap((entry) =>
+                collect(path.join(target, entry))
+              );
+            }
+            return textExtensions.has(path.extname(target).toLowerCase())
+              ? [target]
+              : [];
+          }
+
+          const files = process.argv.slice(2).flatMap(collect);
+          if (files.length === 0) {
+            throw new Error("No text assets were found to scan");
+          }
+          const findings = [];
+          for (const file of files) {
+            const source = fs.readFileSync(file, "utf8");
+            for (const [label, pattern] of [
+              ...endpointPatterns,
+              ...credentialPatterns,
+            ]) {
+              for (const match of source.matchAll(pattern)) {
+                findings.push(`${file}: ${label}: ${match[0].slice(0, 160)}`);
+              }
+            }
+            for (const match of source.matchAll(urlPattern)) {
+              const url = match[0];
+              if (
+                !allowedUrls.has(url)
+                && !allowedUrlPrefixes.some((prefix) => url.startsWith(prefix))
+              ) {
+                findings.push(`${file}: unexpected fixed URL: ${url.slice(0, 160)}`);
+              }
+            }
+          }
+          if (findings.length > 0) {
+            console.error(findings.join("\n"));
+            process.exit(1);
+          }
+          NODE
+          node "$RUNNER_TEMP/scan-mobile-assets.cjs" dist
+          cp -R dist/. pakeplus/scripts/www/
+
+      - name: Configure PakePlus for embedded HTML
+        working-directory: pakeplus
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq \
+            --arg name "$APP_NAME" \
+            --arg displayName "$DISPLAY_NAME" \
+            --arg appid "$APP_ID" \
+            --arg version "$APP_VERSION" \
+            '
+              .name = $name
+              | .url = ""
+              | .showName = $displayName
+              | .appid = $appid
+              | .version = $version
+              | .desc = "Codex Mobile"
+              | .isHtml = true
+              | .ios.name = $name
+              | .ios.showName = $displayName
+              | .ios.id = $appid
+              | .ios.version = $version
+              | .ios.webUrl = ""
+              | .ios.desc = "Codex Mobile"
+              | .ios.pubBody = ($displayName + " v" + $version)
+              | .ios.isHtml = true
+              | .ios.debug = false
+            ' scripts/ppconfig.json > "$RUNNER_TEMP/ppconfig-ios.json"
+          mv "$RUNNER_TEMP/ppconfig-ios.json" scripts/ppconfig.json
+          jq -e \
+            --arg appid "$APP_ID" \
+            --arg version "$APP_VERSION" \
+            '
+              .ios.id == $appid
+              and .ios.version == $version
+              and .ios.isHtml == true
+              and .ios.webUrl == ""
+            ' scripts/ppconfig.json > /dev/null
+
+      - name: Install PakePlus dependencies
+        working-directory: pakeplus
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate iOS project
+        working-directory: pakeplus
+        run: pnpm pp:worker
+
+      - name: Harden and test the iOS host
+        working-directory: pakeplus
+        shell: bash
+        run: |
+          set -euo pipefail
+          plist="PakePlus/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :DEBUG false" "$plist"
+          /usr/libexec/PlistBuddy \
+            -c "Delete :NSAppTransportSecurity:NSAllowsArbitraryLoads" \
+            "$plist"
+          /usr/libexec/PlistBuddy -c "Delete :UIBackgroundModes" \
+            "$plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy \
+            -c "Delete :NSLocationWhenInUseUsageDescription" \
+            "$plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy \
+            -c "Delete :NSCameraReactionEffectGesturesEnabledDefault" \
+            "$plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy \
+            -c "Add :NSLocalNetworkUsageDescription string 连接用户添加的局域网 Codex 网关" \
+            "$plist" 2>/dev/null \
+            || /usr/libexec/PlistBuddy \
+              -c "Set :NSLocalNetworkUsageDescription 连接用户添加的局域网 Codex 网关" \
+              "$plist"
+          /usr/libexec/PlistBuddy \
+            -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" \
+            "$plist" 2>/dev/null \
+            || /usr/libexec/PlistBuddy \
+              -c "Set :NSAppTransportSecurity:NSAllowsLocalNetworking true" \
+              "$plist"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("PakePlus/WebView.swift")
+          source = path.read_text()
+          developer_extras = '''        // enable developer extras
+                  if #available(iOS 16.4, *) {
+                      webConfiguration.preferences.setValue(true, forKey: "developerExtrasEnabled")
+                  } else {
+                      webConfiguration.preferences.setValue(true, forKey: "developerExtrasEnabled")
+                      UserDefaults.standard.set(true, forKey: "WebKitDeveloperExtras")
+                  }
+          '''
+          if developer_extras not in source:
+              raise SystemExit("Pinned PakePlus developer extras block changed")
+          source = source.replace(developer_extras, "")
+          media_prompt = "        decisionHandler(permissionDecisionForMediaCapture(type: type))"
+          if media_prompt not in source:
+              raise SystemExit("Pinned PakePlus media permission hook changed")
+          source = source.replace(media_prompt, "        decisionHandler(.deny)")
+          geolocation_prompt = "        context.coordinator.prepareWebGeolocationAuthorization()\n"
+          if geolocation_prompt not in source:
+              raise SystemExit("Pinned PakePlus geolocation hook changed")
+          source = source.replace(geolocation_prompt, "")
+          path.write_text(source)
+          Path("PakePlus/vConsole.js").unlink(missing_ok=True)
+          PY
+          test -s PakePlus/index.html
+          find PakePlus/assets -type f -name '*.js' -print -quit | grep -q .
+          test "$(/usr/libexec/PlistBuddy -c 'Print :DEBUG' "$plist")" = "false"
+          test "$(/usr/libexec/PlistBuddy \
+            -c 'Print :NSAppTransportSecurity:NSAllowsLocalNetworking' \
+            "$plist")" = "true"
+          test -n "$(/usr/libexec/PlistBuddy \
+            -c 'Print :NSLocalNetworkUsageDescription' "$plist")"
+          if /usr/libexec/PlistBuddy \
+            -c 'Print :NSAppTransportSecurity:NSAllowsArbitraryLoads' \
+            "$plist" >/dev/null 2>&1; then
+            echo "::error::iOS host still allows arbitrary network loads"
+            exit 1
+          fi
+          if grep -Fq 'developerExtrasEnabled' PakePlus/WebView.swift; then
+            echo "::error::Release iOS host still enables developer extras"
+            exit 1
+          fi
+          grep -Fq 'decisionHandler(.deny)' PakePlus/WebView.swift
+          if grep -Fq 'context.coordinator.prepareWebGeolocationAuthorization()' \
+            PakePlus/WebView.swift; then
+            echo "::error::Release iOS host still requests geolocation"
+            exit 1
+          fi
+          node "$RUNNER_TEMP/scan-mobile-assets.cjs" PakePlus
+
+      - name: Generate AppIcon
+        working-directory: pakeplus
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install Nonchalant/appicon/appicon
+          appicon app-icon.png \
+            --output-path PakePlus/Assets.xcassets/AppIcon.appiconset
+
+      - name: Build unsigned iOS app
+        working-directory: pakeplus
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project PakePlus.xcodeproj \
+            -scheme PakePlus \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Prepare and verify unsigned IPA
+        working-directory: pakeplus
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/DerivedData/Build/Products/Release-iphoneos/PakePlus.app"
+          package="$RUNNER_TEMP/ipa"
+          artifact="$RUNNER_TEMP/CodexMobile-v${APP_VERSION}-unsigned.ipa"
+          listing="$RUNNER_TEMP/CodexMobile-ios-contents.txt"
+          unpacked="$RUNNER_TEMP/CodexMobile-ios-unpacked"
+          test -d "$app"
+          test -s "$app/index.html"
+          find "$app/assets" -type f -name '*.js' -print -quit | grep -q .
+          test "$(/usr/libexec/PlistBuddy -c 'Print :DEBUG' \
+            "$app/Info.plist")" = "false"
+          test "$(/usr/libexec/PlistBuddy \
+            -c 'Print :NSAppTransportSecurity:NSAllowsLocalNetworking' \
+            "$app/Info.plist")" = "true"
+          if /usr/libexec/PlistBuddy \
+            -c 'Print :NSAppTransportSecurity:NSAllowsArbitraryLoads' \
+            "$app/Info.plist" >/dev/null 2>&1; then
+            echo "::error::Final iOS app still allows arbitrary network loads"
+            exit 1
+          fi
+          for key in \
+            ':NSLocationWhenInUseUsageDescription' \
+            ':UIBackgroundModes'; do
+            if /usr/libexec/PlistBuddy -c "Print $key" \
+              "$app/Info.plist" >/dev/null 2>&1; then
+              echo "::error::Final iOS app contains unnecessary key $key"
+              exit 1
+            fi
+          done
+          mkdir -p "$package/Payload"
+          cp -R "$app" "$package/Payload/"
+          (
+            cd "$package"
+            zip -qry "$artifact" Payload
+          )
+          test -s "$artifact"
+          unzip -l "$artifact" > "$listing"
+          grep -Fq 'Payload/PakePlus.app/index.html' "$listing"
+          grep -Eq 'Payload/PakePlus.app/assets/.+\.js' "$listing"
+          unzip -q "$artifact" -d "$unpacked"
+          node "$RUNNER_TEMP/scan-mobile-assets.cjs" \
+            "$unpacked/Payload/PakePlus.app"
+          shasum -a 256 "$artifact"
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodexMobile-ios-unsigned
+          path: ${{ runner.temp }}/CodexMobile-v${{ env.APP_VERSION }}-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
