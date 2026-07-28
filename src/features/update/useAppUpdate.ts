@@ -6,7 +6,7 @@ import {
   useState,
 } from "react";
 import {
-  APP_UPDATE_REPOSITORY,
+  APP_UPDATE_API_URL,
   compareSemanticVersions,
   createReleaseChecker,
   type AppRelease,
@@ -63,7 +63,7 @@ function bridgeVersion(bridge: AndroidAppUpdateBridge | null) {
 
 async function fetchLatestRelease() {
   const response = await fetch(
-    `https://api.github.com/repos/${APP_UPDATE_REPOSITORY}/releases/latest`,
+    APP_UPDATE_API_URL,
     {
       headers: {
         Accept: "application/vnd.github+json",

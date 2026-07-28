@@ -1,4 +1,6 @@
 export const APP_UPDATE_REPOSITORY = "loock-ai/codex-mobile";
+export const APP_UPDATE_API_URL =
+  "https://api.github.com/repos/loock-ai/codex-mobile/releases/latest";
 export const APP_UPDATE_CACHE_KEY = "codex-mobile:app-update:last-release";
 
 export interface SemanticVersion {

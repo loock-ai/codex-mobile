@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  APP_UPDATE_API_URL,
   APP_UPDATE_REPOSITORY,
   compareSemanticVersions,
   createReleaseChecker,
@@ -28,6 +29,12 @@ const releasePayload = {
 };
 
 describe("App 自动更新 Release 模型", () => {
+  it("使用不可变的本项目 Latest Release 地址", () => {
+    expect(APP_UPDATE_API_URL).toBe(
+      "https://api.github.com/repos/loock-ai/codex-mobile/releases/latest",
+    );
+  });
+
   it("解析、比较语义版本并自动增加补丁版本", () => {
     expect(parseSemanticVersion("v1.2.3")).toEqual({
       major: 1,
