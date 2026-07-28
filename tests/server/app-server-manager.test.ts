@@ -23,20 +23,15 @@ describe("app-server 运行模式", () => {
     });
   });
 
-  it("非回环监听必须同时配置口令和 Origin 白名单", () => {
+  it("非回环监听必须配置口令，但不限制 Origin", () => {
     expect(() =>
-      assertGatewaySecurity("0.0.0.0", "", undefined),
+      assertGatewaySecurity("0.0.0.0", ""),
     ).toThrow("访问口令");
     expect(() =>
-      assertGatewaySecurity("0.0.0.0", "secret", undefined),
-    ).toThrow("Origin");
-    expect(() =>
-      assertGatewaySecurity("0.0.0.0", "secret", [
-        "http://192.168.100.8:4173",
-      ]),
+      assertGatewaySecurity("0.0.0.0", "secret"),
     ).not.toThrow();
     expect(() =>
-      assertGatewaySecurity("127.0.0.1", "", undefined),
+      assertGatewaySecurity("127.0.0.1", ""),
     ).not.toThrow();
   });
 
@@ -60,7 +55,7 @@ describe("app-server 运行模式", () => {
     });
   });
 
-  it("解析设备身份、允许 Origin 和静态资源模式", () => {
+  it("解析设备身份和静态资源模式，并忽略旧 Origin 白名单", () => {
     expect(
       resolveGatewayRuntimeConfig(
         {
@@ -76,10 +71,6 @@ describe("app-server 运行模式", () => {
       hostId: "mac-mini",
       displayName: "Mac mini",
       hostname: "mac-mini.local",
-      allowedOrigins: [
-        "http://192.168.100.8:4173",
-        "http://mac-mini.local:4173",
-      ],
       serveStatic: false,
     });
   });

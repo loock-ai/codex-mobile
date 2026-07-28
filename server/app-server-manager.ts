@@ -11,7 +11,6 @@ export interface GatewayRuntimeConfig {
   hostId: string;
   displayName: string;
   hostname: string;
-  allowedOrigins?: string[];
   serveStatic: boolean;
 }
 
@@ -19,17 +18,10 @@ export function resolveGatewayRuntimeConfig(
   environment: Record<string, string | undefined> = process.env,
   hostname = "localhost",
 ): GatewayRuntimeConfig {
-  const configuredOrigins = environment.CODEX_MOBILE_ALLOWED_ORIGINS
-    ?.split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
   return {
     hostId: environment.CODEX_MOBILE_HOST_ID?.trim() || hostname,
     displayName: environment.CODEX_MOBILE_HOST_NAME?.trim() || hostname,
     hostname,
-    ...(configuredOrigins?.length
-      ? { allowedOrigins: configuredOrigins }
-      : {}),
     serveStatic: environment.CODEX_MOBILE_SERVE_STATIC !== "false",
   };
 }
@@ -51,16 +43,10 @@ export function appServerEnvironment(
 export function assertGatewaySecurity(
   host: string,
   accessToken: string | undefined,
-  allowedOrigins: string[] | undefined,
 ) {
   if (["127.0.0.1", "::1", "localhost"].includes(host)) return;
   if (!accessToken) {
     throw new Error("非回环监听必须配置 CODEX_MOBILE_TOKEN 访问口令");
-  }
-  if (!allowedOrigins?.length) {
-    throw new Error(
-      "非回环监听必须配置 CODEX_MOBILE_ALLOWED_ORIGINS Origin 白名单",
-    );
   }
 }
 

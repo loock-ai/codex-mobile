@@ -20,7 +20,6 @@ const port = Number(process.env.PORT ?? "4173");
 assertGatewaySecurity(
   host,
   process.env.CODEX_MOBILE_TOKEN,
-  gatewayRuntime.allowedOrigins,
 );
 const managed =
   runtime.mode === "managed" ? await startManagedAppServer(runtime.upstreamPort) : null;
@@ -39,7 +38,6 @@ try {
     displayName: gatewayRuntime.displayName,
     hostname: gatewayRuntime.hostname,
     gatewayVersion: process.env.npm_package_version ?? "0.2.0",
-    allowedOrigins: gatewayRuntime.allowedOrigins,
     readProjectDirectories: () =>
       readCodexProjectDirectories(
         join(

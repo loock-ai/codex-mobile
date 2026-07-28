@@ -15,7 +15,6 @@ export interface GatewayOptions {
   hostname?: string;
   gatewayVersion?: string;
   appServerReady?: () => Promise<boolean>;
-  allowedOrigins?: string[];
   readProjectDirectories?: () => Promise<string[]>;
 }
 
@@ -47,16 +46,11 @@ function authorized(url: URL, expected?: string, cookie?: string) {
   );
 }
 
-function originAllowed(origin: string | undefined, allowed?: string[]) {
-  return !origin || !allowed?.length || allowed.includes(origin);
-}
-
 function applyCors(
   response: import("node:http").ServerResponse,
   origin: string | undefined,
-  allowed?: string[],
 ) {
-  if (!origin || !allowed?.includes(origin)) return;
+  if (!origin) return;
   response.setHeader("access-control-allow-origin", origin);
   response.setHeader("access-control-allow-methods", "GET, OPTIONS");
   response.setHeader("access-control-allow-headers", "content-type");
@@ -72,18 +66,15 @@ export async function createGateway(options: GatewayOptions): Promise<Gateway> {
       "/api/host",
       "/api/projects",
     ].includes(url.pathname);
-    if (
-      controlRequest &&
-      !originAllowed(origin, options.allowedOrigins)
-    ) {
-      response.statusCode = 403;
-      response.end("Forbidden");
-      return;
-    }
+    const apiRequest =
+      url.pathname === "/api" || url.pathname.startsWith("/api/");
     if (controlRequest) {
-      applyCors(response, origin, options.allowedOrigins);
+      applyCors(response, origin);
     }
-    if (!authorized(url, options.accessToken, request.headers.cookie)) {
+    if (
+      apiRequest &&
+      !authorized(url, options.accessToken, request.headers.cookie)
+    ) {
       response.statusCode = 401;
       response.end("Unauthorized");
       return;
@@ -139,6 +130,11 @@ export async function createGateway(options: GatewayOptions): Promise<Gateway> {
       }
       return;
     }
+    if (apiRequest) {
+      response.statusCode = 404;
+      response.end("Not found");
+      return;
+    }
     if (!options.staticDir) {
       response.statusCode = 404;
       response.end("Not found");
@@ -169,11 +165,6 @@ export async function createGateway(options: GatewayOptions): Promise<Gateway> {
     const url = new URL(request.url ?? "/", "http://gateway.local");
     if (url.pathname !== "/ws") {
       socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
-      socket.destroy();
-      return;
-    }
-    if (!originAllowed(request.headers.origin, options.allowedOrigins)) {
-      socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       socket.destroy();
       return;
     }

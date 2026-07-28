@@ -1,4 +1,7 @@
 import { createServer } from "node:http";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
 import { createGateway } from "../../server/gateway.js";
@@ -96,6 +99,80 @@ describe("透明网关", () => {
     expect(allowed.status).toBe(200);
   });
 
+  it("未携带口令仍返回前端页面、静态资源和路由回退", async () => {
+    const staticDir = await mkdtemp(join(tmpdir(), "codex-mobile-gateway-"));
+    await mkdir(join(staticDir, "assets"));
+    await writeFile(join(staticDir, "index.html"), "<main>Codex Mobile</main>");
+    await writeFile(join(staticDir, "assets", "app.js"), "window.app = true;");
+    cleanups.push(() => rm(staticDir, { recursive: true, force: true }));
+
+    const gateway = await createGateway({
+      host: "127.0.0.1",
+      port: 0,
+      mode: "external",
+      upstreamUrl: "ws://127.0.0.1:9",
+      staticDir,
+      accessToken: "expected-token",
+    });
+    cleanups.push(async () => gateway.close());
+
+    const root = await fetch(`http://127.0.0.1:${gateway.port}/`);
+    const asset = await fetch(
+      `http://127.0.0.1:${gateway.port}/assets/app.js`,
+    );
+    const route = await fetch(
+      `http://127.0.0.1:${gateway.port}/conversation/thread-1`,
+    );
+
+    expect(root.status).toBe(200);
+    expect(await root.text()).toContain("Codex Mobile");
+    expect(asset.status).toBe(200);
+    expect(await asset.text()).toBe("window.app = true;");
+    expect(route.status).toBe(200);
+    expect(await route.text()).toContain("Codex Mobile");
+  });
+
+  it("错误口令只能加载前端壳，正确口令 Cookie 才能访问 API", async () => {
+    const staticDir = await mkdtemp(join(tmpdir(), "codex-mobile-gateway-"));
+    await writeFile(join(staticDir, "index.html"), "<main>Codex Mobile</main>");
+    cleanups.push(() => rm(staticDir, { recursive: true, force: true }));
+
+    const gateway = await createGateway({
+      host: "127.0.0.1",
+      port: 0,
+      mode: "external",
+      upstreamUrl: "ws://127.0.0.1:9",
+      staticDir,
+      accessToken: "expected-token",
+    });
+    cleanups.push(async () => gateway.close());
+
+    const wrongPage = await fetch(
+      `http://127.0.0.1:${gateway.port}/?token=wrong-token`,
+    );
+    const wrongApi = await fetch(
+      `http://127.0.0.1:${gateway.port}/api/status?token=wrong-token`,
+    );
+    const authenticatedPage = await fetch(
+      `http://127.0.0.1:${gateway.port}/?token=expected-token`,
+    );
+    const cookie = authenticatedPage.headers.get("set-cookie")?.split(";")[0];
+    const cookieApi = await fetch(
+      `http://127.0.0.1:${gateway.port}/api/status`,
+      { headers: { Cookie: cookie ?? "" } },
+    );
+    const unknownApi = await fetch(
+      `http://127.0.0.1:${gateway.port}/api/unknown?token=expected-token`,
+    );
+
+    expect(wrongPage.status).toBe(200);
+    expect(wrongPage.headers.get("set-cookie")).toBeNull();
+    expect(wrongApi.status).toBe(401);
+    expect(cookie).toBe("codex_mobile_token=expected-token");
+    expect(cookieApi.status).toBe(200);
+    expect(unknownApi.status).toBe(404);
+  });
+
   it("项目接口返回 Codex 配置中的目录", async () => {
     const gateway = await createGateway({
       host: "127.0.0.1",
@@ -130,7 +207,6 @@ describe("透明网关", () => {
       hostname: "mac-mini.local",
       gatewayVersion: "0.2.0",
       appServerReady: async () => false,
-      allowedOrigins: ["http://frontend.local:4173"],
     });
     cleanups.push(async () => gateway.close());
 
@@ -152,7 +228,7 @@ describe("透明网关", () => {
     });
   });
 
-  it("控制接口支持预检并拒绝未允许的跨源请求", async () => {
+  it("控制接口支持预检并允许任意跨源请求", async () => {
     const gateway = await createGateway({
       host: "127.0.0.1",
       port: 0,
@@ -160,7 +236,6 @@ describe("透明网关", () => {
       upstreamUrl: "ws://127.0.0.1:9",
       staticDir: null,
       accessToken: "host-token",
-      allowedOrigins: ["http://frontend.local:4173"],
     });
     cleanups.push(async () => gateway.close());
     const url = `http://127.0.0.1:${gateway.port}/api/host?token=host-token`;
@@ -169,7 +244,7 @@ describe("透明网关", () => {
       method: "OPTIONS",
       headers: { Origin: "http://frontend.local:4173" },
     });
-    const rejected = await fetch(url, {
+    const crossOrigin = await fetch(url, {
       headers: { Origin: "http://attacker.local:4173" },
     });
 
@@ -177,30 +252,31 @@ describe("透明网关", () => {
     expect(preflight.headers.get("access-control-allow-methods")).toContain(
       "GET",
     );
-    expect(rejected.status).toBe(403);
-    expect(rejected.headers.get("access-control-allow-origin")).toBeNull();
+    expect(crossOrigin.status).toBe(200);
+    expect(crossOrigin.headers.get("access-control-allow-origin")).toBe(
+      "http://attacker.local:4173",
+    );
   });
 
-  it("WebSocket 只接受允许的浏览器 Origin", async () => {
+  it("WebSocket 接受任意浏览器 Origin", async () => {
     const gateway = await createGateway({
       host: "127.0.0.1",
       port: 0,
       mode: "external",
       upstreamUrl: "ws://127.0.0.1:9",
       staticDir: null,
-      allowedOrigins: ["http://frontend.local:4173"],
+      accessToken: "expected-token",
     });
     cleanups.push(async () => gateway.close());
 
-    const client = new WebSocket(`ws://127.0.0.1:${gateway.port}/ws`, {
-      origin: "http://attacker.local:4173",
-    });
-    const status = await new Promise<number>((resolve) =>
-      client.once("unexpected-response", (_request, response) =>
-        resolve(response.statusCode ?? 0),
-      ),
+    const client = new WebSocket(
+      `ws://127.0.0.1:${gateway.port}/ws?token=expected-token`,
+      { origin: "http://attacker.local:4173" },
     );
-
-    expect(status).toBe(403);
+    await new Promise<void>((resolve, reject) => {
+      client.once("open", resolve);
+      client.once("error", reject);
+    });
+    client.close();
   });
 });
