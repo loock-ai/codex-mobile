@@ -1,0 +1,198 @@
+name: Build Android APKs
+
+on:
+  workflow_dispatch:
+    inputs:
+      codex_mini_page_url:
+        description: CodexMini page URL
+        required: true
+        type: string
+        default: http://192.168.100.8:4173/
+      codex_macbook_page_url:
+        description: CodexMacBook page URL
+        required: true
+        type: string
+        default: http://192.168.100.35:4173/
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.app_name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app_name: CodexMini
+            package_name: vip.loock.codexmini
+            version: "1.0.0"
+            description: Codex Remote Mac mini LAN Android client
+            page_url: ${{ inputs.codex_mini_page_url }}
+          - app_name: CodexMacBook
+            package_name: vip.loock.codexmacbook
+            version: "1.0.0"
+            description: Codex Remote MacBook LAN Android client
+            page_url: ${{ inputs.codex_macbook_page_url }}
+    env:
+      PAGE_URL: ${{ matrix.page_url }}
+
+    steps:
+      - name: Checkout pinned PakePlus Android
+        uses: actions/checkout@v4
+        with:
+          repository: Sjj1024/PakePlus-Android
+          ref: 787b9e5ea2da1b2d959485417ffeee62f0d30960
+          path: pakeplus
+          persist-credentials: false
+
+      - name: Validate page URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$PAGE_URL" in
+            http://*|https://*) ;;
+            *)
+              echo "::error::PAGE_URL must start with http:// or https://"
+              exit 1
+              ;;
+          esac
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            pakeplus/**/*.gradle*
+            pakeplus/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+          cache: pnpm
+          cache-dependency-path: pakeplus/pnpm-lock.yaml
+
+      - name: Install ImageMagick
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes imagemagick
+          convert --version
+
+      - name: Configure PakePlus
+        working-directory: pakeplus
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq \
+            --arg name "${{ matrix.app_name }}" \
+            --arg appid "${{ matrix.package_name }}" \
+            --arg version "${{ matrix.version }}" \
+            --arg url "$PAGE_URL" \
+            --arg description "${{ matrix.description }}" \
+            '
+              .name = $name
+              | .url = $url
+              | .showName = $name
+              | .appid = $appid
+              | .version = $version
+              | .desc = $description
+              | .android.name = $name
+              | .android.showName = $name
+              | .android.id = $appid
+              | .android.version = $version
+              | .android.webUrl = $url
+              | .android.desc = $description
+              | .android.pubBody = ($name + " v" + $version + " LAN client")
+              | .android.isHtml = false
+              | .android.debug = false
+              | .phone.internet = true
+            ' scripts/ppconfig.json > "$RUNNER_TEMP/ppconfig.json"
+          mv "$RUNNER_TEMP/ppconfig.json" scripts/ppconfig.json
+
+      - name: Test generated PakePlus config
+        working-directory: pakeplus
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e \
+            --arg name "${{ matrix.app_name }}" \
+            --arg appid "${{ matrix.package_name }}" \
+            --arg version "${{ matrix.version }}" \
+            --arg url "$PAGE_URL" \
+            '
+              .name == $name
+              and .url == $url
+              and .appid == $appid
+              and .android.name == $name
+              and .android.showName == $name
+              and .android.id == $appid
+              and .android.version == $version
+              and .android.webUrl == $url
+              and .android.isHtml == false
+              and .phone.internet == true
+            ' scripts/ppconfig.json > /dev/null
+          grep -Fq 'android:usesCleartextTraffic="true"' \
+            app/src/main/AndroidManifest.xml
+
+      - name: Install PakePlus dependencies
+        working-directory: pakeplus
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Android project config
+        working-directory: pakeplus
+        run: pnpm pp:worker
+
+      - name: Test generated Android project
+        working-directory: pakeplus
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e --arg url "$PAGE_URL" \
+            '.webUrl == $url and .internet == true' \
+            app/src/main/assets/app.json > /dev/null
+          grep -Fq 'applicationId = "${{ matrix.package_name }}"' \
+            app/build.gradle.kts
+          grep -Fq 'versionName = "${{ matrix.version }}"' \
+            app/build.gradle.kts
+          test -s pakeplus.keystore
+
+      - name: Build debug APK
+        working-directory: pakeplus
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Prepare APK artifact
+        working-directory: pakeplus
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/apk"
+          cp app/build/outputs/apk/debug/app-debug.apk \
+            "$RUNNER_TEMP/apk/${{ matrix.app_name }}-v${{ matrix.version }}.apk"
+          test -s \
+            "$RUNNER_TEMP/apk/${{ matrix.app_name }}-v${{ matrix.version }}.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.app_name }}-android
+          path: ${{ runner.temp }}/apk/${{ matrix.app_name }}-v${{ matrix.version }}.apk
+          if-no-files-found: error
+          retention-days: 7
