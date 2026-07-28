@@ -2,6 +2,7 @@
   "name": "codex-web-mobile",
   "version": "0.2.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "zsh -lc 'source \"${CODEX_MOBILE_ENV_FILE:-$HOME/Library/Application Support/CodexMobileWeb/gateway.env}\" && exec npm exec -- concurrently --kill-others --success first --names gateway,vite \"npm:dev:gateway\" \"npm:dev:web\"'",
