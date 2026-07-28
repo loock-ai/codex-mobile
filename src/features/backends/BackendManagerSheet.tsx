@@ -45,6 +45,7 @@ export function BackendManagerSheet({
   summaries,
   onChange,
   onClose,
+  appUpdate,
   probe = defaultProbeBackend,
 }: {
   open: boolean;
@@ -52,6 +53,13 @@ export function BackendManagerSheet({
   summaries: Record<string, BackendRuntimeSummary>;
   onChange: (registry: BackendRegistry) => void;
   onClose: () => void;
+  appUpdate?: {
+    supported: boolean;
+    currentVersion: string;
+    checking: boolean;
+    status?: string;
+    onCheck: () => void;
+  };
   probe?: (backend: BackendConfig) => Promise<GatewayHostInfo>;
 }) {
   const [draft, setDraft] = useState<BackendDraft | null>(() =>
@@ -292,6 +300,22 @@ export function BackendManagerSheet({
             >
               ＋ 添加设备
             </button>
+            {appUpdate?.supported && (
+              <section className="backend-app-update" aria-label="应用更新">
+                <div>
+                  <strong>Codex Mobile</strong>
+                  <small>当前版本 v{appUpdate.currentVersion}</small>
+                  {appUpdate.status && <small>{appUpdate.status}</small>}
+                </div>
+                <button
+                  type="button"
+                  disabled={appUpdate.checking}
+                  onClick={appUpdate.onCheck}
+                >
+                  {appUpdate.checking ? "正在检查…" : "检查更新"}
+                </button>
+              </section>
+            )}
           </>
         )}
       </section>

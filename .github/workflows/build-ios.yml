@@ -65,6 +65,8 @@ jobs:
             "http://www.w3.org/",
             "https://github.com/remarkjs/",
             "https://github.com/syntax-tree/",
+            "https://github.com/loock-ai/codex-mobile/releases/",
+            "https://api.github.com/repos/loock-ai/codex-mobile/releases/",
             "https://react.dev/errors/",
           ];
           const allowedUrls = new Set([

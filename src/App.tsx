@@ -79,6 +79,11 @@ import type {
 } from "./backends/types";
 import { BackendManagerSheet } from "./features/backends/BackendManagerSheet";
 import { BackendAttentionBanner } from "./features/backends/BackendAttentionBanner";
+import { AppUpdateSheet } from "./features/update/AppUpdateSheet";
+import {
+  useAppUpdate,
+  type AppUpdateController,
+} from "./features/update/useAppUpdate";
 import {
   aggregateThreads,
   filterAggregatedThreads,
@@ -1577,9 +1582,15 @@ export function AppBootstrap({
   const [managerOpen, setManagerOpen] = useState(
     !initialRegistry.backends.length,
   );
+  const appUpdate = useAppUpdate();
 
   if (registry.backends.length) {
-    return <ConfiguredApp initialRegistry={registry} />;
+    return (
+      <ConfiguredApp
+        initialRegistry={registry}
+        appUpdate={appUpdate}
+      />
+    );
   }
 
   return (
@@ -1604,6 +1615,25 @@ export function AppBootstrap({
           setRegistry(next);
         }}
         onClose={() => setManagerOpen(false)}
+        appUpdate={{
+          supported: appUpdate.supported,
+          currentVersion: appUpdate.state.currentVersion,
+          checking: appUpdate.state.phase === "checking",
+          status:
+            appUpdate.state.phase === "current"
+              ? "已是最新版本"
+              : appUpdate.state.phase === "error"
+                ? appUpdate.state.error
+                : undefined,
+          onCheck: () => void appUpdate.check(true),
+        }}
+      />
+      <AppUpdateSheet
+        open={appUpdate.sheetOpen}
+        state={appUpdate.state}
+        onClose={() => appUpdate.setSheetOpen(false)}
+        onInstall={appUpdate.install}
+        onRetry={appUpdate.install}
       />
     </main>
   );
@@ -1611,8 +1641,10 @@ export function AppBootstrap({
 
 function ConfiguredApp({
   initialRegistry,
+  appUpdate,
 }: {
   initialRegistry: BackendRegistry;
+  appUpdate: AppUpdateController;
 }) {
   const [registry, setRegistry] = useState(initialRegistry);
   const [summaries, setSummaries] = useState<
@@ -2105,6 +2137,25 @@ function ConfiguredApp({
         summaries={summaries}
         onChange={persistRegistry}
         onClose={() => setManagerOpen(false)}
+        appUpdate={{
+          supported: appUpdate.supported,
+          currentVersion: appUpdate.state.currentVersion,
+          checking: appUpdate.state.phase === "checking",
+          status:
+            appUpdate.state.phase === "current"
+              ? "已是最新版本"
+              : appUpdate.state.phase === "error"
+                ? appUpdate.state.error
+                : undefined,
+          onCheck: () => void appUpdate.check(true),
+        }}
+      />
+      <AppUpdateSheet
+        open={appUpdate.sheetOpen}
+        state={appUpdate.state}
+        onClose={() => appUpdate.setSheetOpen(false)}
+        onInstall={appUpdate.install}
+        onRetry={appUpdate.install}
       />
     </>
   );

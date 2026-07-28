@@ -20,8 +20,31 @@ interface WorkflowStep {
 }
 
 interface Workflow {
+  on?: {
+    push?: {
+      branches?: string[];
+      paths?: string[];
+    };
+    workflow_dispatch?: unknown;
+  };
+  concurrency?: {
+    group?: string;
+    "cancel-in-progress"?: boolean;
+  };
+  permissions?: {
+    contents?: string;
+  };
   jobs: {
     build: {
+      outputs?: Record<string, string>;
+      steps: WorkflowStep[];
+    };
+    release?: {
+      if?: string;
+      needs?: string;
+      permissions?: {
+        contents?: string;
+      };
       steps: WorkflowStep[];
     };
   };
@@ -92,6 +115,12 @@ describe("移动 App 内置前端流水线", () => {
     expect(buildFrontend).toContain("bearer");
     expect(buildFrontend).toContain("169\\.254");
     expect(buildFrontend).toContain("::1");
+    expect(buildFrontend).toContain(
+      "https://api.github.com/repos/loock-ai/codex-mobile/releases/",
+    );
+    expect(buildFrontend).toContain(
+      "https://github.com/loock-ai/codex-mobile/releases/",
+    );
     expect(runAssetScanner(scanner, 'const socket = "wss://gateway.example/ws";').status)
       .not.toBe(0);
     expect(
@@ -147,6 +176,92 @@ describe("移动 App 内置前端流水线", () => {
     expect(source).not.toMatch(/192\.168\.\d+\.\d+/);
   });
 
+  it("Android 在 main 前端变更时自动递增版本并原子发布 Release", () => {
+    const { source, workflow } = readWorkflow(
+      ".github/workflows/build-android.yml",
+    );
+    expect(workflow.on?.push?.branches).toEqual(["main"]);
+    expect(workflow.on?.push?.paths).toEqual(
+      expect.arrayContaining([
+        "src/**",
+        "public/**",
+        "index.html",
+        "package.json",
+        "package-lock.json",
+        "vite.config.ts",
+        ".github/workflows/build-android.yml",
+      ]),
+    );
+    expect(workflow.on).toHaveProperty("workflow_dispatch");
+    expect(workflow.concurrency).toMatchObject({
+      "cancel-in-progress": true,
+    });
+    expect(workflow.permissions?.contents).toBe("read");
+
+    const resolveVersion = readRunStep(workflow, "Resolve app version");
+    expect(resolveVersion).toContain("releases/latest");
+    expect(resolveVersion).toContain("package.json");
+    expect(resolveVersion).toContain("patch + 1");
+    expect(resolveVersion).toContain("GITHUB_OUTPUT");
+    expect(resolveVersion).toContain("GITHUB_ENV");
+    expect(workflow.jobs.build.outputs).toHaveProperty("app_version");
+
+    const hardenHost = readRunStep(
+      workflow,
+      "Harden and test embedded Android project",
+    );
+    expect(hardenHost).toContain("APP_VERSION_CODE");
+    expect(hardenHost).toContain("versionCode =");
+    expect(hardenHost).toContain("versionName =");
+
+    const verifyArtifact = readRunStep(workflow, "Prepare and verify APK");
+    expect(verifyArtifact).toContain("sha256sum");
+    expect(verifyArtifact).toContain(".sha256");
+
+    expect(workflow.jobs.release?.needs).toBe("build");
+    expect(workflow.jobs.release?.permissions?.contents).toBe("write");
+    expect(workflow.jobs.release?.if).toContain("github.event_name == 'push'");
+    const publish = workflow.jobs.release?.steps.find(
+      (step) => step.name === "Publish GitHub Release",
+    )?.run;
+    expect(publish).toContain("gh release create");
+    expect(publish).toContain("--generate-notes");
+    expect(publish).toContain("--draft");
+    expect(publish).toContain("gh release edit");
+    expect(publish).toContain("--draft=false");
+    expect(publish).toContain("--cleanup-tag");
+    expect(publish).toContain("CodexMobile-v");
+    expect(source).toContain("actions/download-artifact@v4");
+  });
+
+  it("Android 更新桥限制下载来源、校验摘要并只增加安装权限", () => {
+    const { source, workflow } = readWorkflow(
+      ".github/workflows/build-android.yml",
+    );
+    const hardenHost = readRunStep(
+      workflow,
+      "Harden and test embedded Android project",
+    );
+    const verifyArtifact = readRunStep(workflow, "Prepare and verify APK");
+
+    expect(hardenHost).toContain("REQUEST_INSTALL_PACKAGES");
+    expect(hardenHost).toContain("FileProvider");
+    expect(hardenHost).toContain("update_file_paths");
+    expect(hardenHost).toContain(
+      "https://github.com/loock-ai/codex-mobile/releases/download/",
+    );
+    expect(hardenHost).toContain("MessageDigest.getInstance(\"SHA-256\")");
+    expect(hardenHost).toContain("fun appVersion(): String");
+    expect(hardenHost).toContain("fun installApk(");
+    expect(hardenHost).toContain("codex-mobile-app-update");
+    expect(hardenHost).toContain("canRequestPackageInstalls");
+    expect(verifyArtifact).toContain("REQUEST_INSTALL_PACKAGES");
+    expect(verifyArtifact).toContain(".fileprovider");
+    expect(source).not.toMatch(
+      /CODEX_MOBILE_TOKEN\s*:\s*[A-Za-z0-9._~+/%=-]{8,}/,
+    );
+  });
+
   it("iOS 只构建一个内置同一份前端的 Codex Mobile App", () => {
     const { source, workflow } = readWorkflow(".github/workflows/build-ios.yml");
     const buildFrontend = readRunStep(workflow, "Build embedded frontend");
@@ -165,6 +280,12 @@ describe("移动 App 内置前端流水线", () => {
     expect(buildFrontend).toContain("bearer");
     expect(buildFrontend).toContain("169\\.254");
     expect(buildFrontend).toContain("::1");
+    expect(buildFrontend).toContain(
+      "https://api.github.com/repos/loock-ai/codex-mobile/releases/",
+    );
+    expect(buildFrontend).toContain(
+      "https://github.com/loock-ai/codex-mobile/releases/",
+    );
     expect(runAssetScanner(scanner, 'const socket = "ws://gateway.example/ws";').status)
       .not.toBe(0);
     expect(hardenHost).toContain("PakePlus/index.html");

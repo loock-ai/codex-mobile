@@ -227,4 +227,31 @@ describe("多设备界面", () => {
     ).toEqual(["mini"]);
     window.confirm = originalConfirm;
   });
+
+  it("Android 容器在设备管理底部展示版本和检查更新入口", () => {
+    const onCheckUpdate = vi.fn();
+    render(
+      <BackendManagerSheet
+        open
+        registry={{
+          version: 1,
+          selectedBackendId: "mini",
+          backends: [mini],
+        }}
+        summaries={summaries}
+        onChange={() => undefined}
+        onClose={() => undefined}
+        appUpdate={{
+          supported: true,
+          currentVersion: "0.2.0",
+          checking: false,
+          onCheck: onCheckUpdate,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("当前版本 v0.2.0")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "检查更新" }));
+    expect(onCheckUpdate).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1,27 +1,76 @@
 name: Build Android App
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "public/**"
+      - "index.html"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
+      - "vite.config.ts"
+      - ".github/workflows/build-android.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   APP_NAME: CodexMobile
   DISPLAY_NAME: Codex Mobile
   APP_ID: vip.loock.codexmobile
-  APP_VERSION: "1.0.0"
 
 jobs:
   build:
     name: Build Codex Mobile Android
     runs-on: ubuntu-latest
+    outputs:
+      app_version: ${{ steps.version.outputs.app_version }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - name: Resolve app version
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          fallback="$(node -p "require('./package.json').version")"
+          version="$fallback"
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            latest="$(
+              gh api "repos/${GITHUB_REPOSITORY}/releases/latest" \
+                --jq '.tag_name' 2>/dev/null || true
+            )"
+            version="$(
+              node - "$latest" "$fallback" <<'NODE'
+          const latest = process.argv[2] || "";
+          const fallback = process.argv[3];
+          const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(latest)
+            || /^v?(\d+)\.(\d+)\.(\d+)$/.exec(fallback);
+          if (!match) throw new Error(`Invalid fallback version: ${fallback}`);
+          const patch = Number(match[3]);
+          process.stdout.write(`${match[1]}.${match[2]}.${patch + 1}`);
+          NODE
+            )"
+          fi
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
+          echo "APP_VERSION_CODE=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          echo "app_version=$version" >> "$GITHUB_OUTPUT"
+          echo "release_tag=v$version" >> "$GITHUB_OUTPUT"
 
       - name: Checkout pinned PakePlus Android
         uses: actions/checkout@v4
@@ -48,7 +97,7 @@ jobs:
         run: |
           set -euo pipefail
           npm ci
-          npm run build
+          VITE_APP_VERSION="$APP_VERSION" npm run build
           test -s dist/index.html
           grep -Eq '(src|href)="\./assets/' dist/index.html
           cat > "$RUNNER_TEMP/scan-mobile-assets.cjs" <<'NODE'
@@ -60,6 +109,8 @@ jobs:
             "http://www.w3.org/",
             "https://github.com/remarkjs/",
             "https://github.com/syntax-tree/",
+            "https://github.com/loock-ai/codex-mobile/releases/",
+            "https://api.github.com/repos/loock-ai/codex-mobile/releases/",
             "https://react.dev/errors/",
           ];
           const allowedUrls = new Set([
@@ -229,6 +280,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
+          import os
+          import re
           import xml.etree.ElementTree as ET
           from pathlib import Path
 
@@ -242,7 +295,20 @@ jobs:
           allowed_permissions = {
               "android.permission.INTERNET",
               "android.permission.ACCESS_NETWORK_STATE",
+              "android.permission.REQUEST_INSTALL_PACKAGES",
           }
+          if not any(
+              child.tag == "uses-permission"
+              and child.get(f"{{{android}}}name")
+                  == "android.permission.REQUEST_INSTALL_PACKAGES"
+              for child in root
+          ):
+              permission = ET.Element("uses-permission")
+              permission.set(
+                  f"{{{android}}}name",
+                  "android.permission.REQUEST_INSTALL_PACKAGES",
+              )
+              root.insert(0, permission)
           for child in list(root):
               if child.tag == "uses-permission":
                   name = child.get(f"{{{android}}}name", "")
@@ -256,7 +322,39 @@ jobs:
           application.set(f"{{{android}}}allowBackup", "false")
           application.attrib.pop(f"{{{android}}}dataExtractionRules", None)
           application.attrib.pop(f"{{{android}}}fullBackupContent", None)
+          for provider in list(application.findall("provider")):
+              if provider.get(f"{{{android}}}authorities", "").endswith(
+                  ".fileprovider"
+              ):
+                  application.remove(provider)
+          provider = ET.SubElement(application, "provider")
+          provider.set(
+              f"{{{android}}}name",
+              "androidx.core.content.FileProvider",
+          )
+          provider.set(
+              f"{{{android}}}authorities",
+              "${applicationId}.fileprovider",
+          )
+          provider.set(f"{{{android}}}exported", "false")
+          provider.set(f"{{{android}}}grantUriPermissions", "true")
+          metadata = ET.SubElement(provider, "meta-data")
+          metadata.set(
+              f"{{{android}}}name",
+              "android.support.FILE_PROVIDER_PATHS",
+          )
+          metadata.set(
+              f"{{{android}}}resource",
+              "@xml/update_file_paths",
+          )
           tree.write(manifest_path, encoding="utf-8", xml_declaration=True)
+          Path("app/src/main/res/xml/update_file_paths.xml").write_text(
+              """<?xml version="1.0" encoding="utf-8"?>
+          <paths xmlns:android="http://schemas.android.com/apk/res/android">
+              <cache-path name="updates" path="updates/" />
+          </paths>
+          """
+          )
           for unused_asset in ("vConsole.js", "pppwd.html"):
               Path("app/src/main/assets", unused_asset).unlink(missing_ok=True)
 
@@ -299,7 +397,45 @@ jobs:
               "            return this@MainActivity.nativeSafeAreaTopCssPx",
               "        }",
               "",
+              "        @JavascriptInterface",
+              "        fun appVersion(): String {",
+              "            return BuildConfig.VERSION_NAME",
+              "        }",
               "",
+              "        @JavascriptInterface",
+              "        fun installApk(downloadUrl: String, sha256: String) {",
+              "            AppUpdater(",
+              "                this@MainActivity,",
+              "                this@MainActivity::emitAppUpdate",
+              "            ).install(downloadUrl, sha256)",
+              "        }",
+              "",
+              "",
+          ))
+          interface_doc_anchor = "\n".join((
+              "    /**",
+              "     * JS 调用的接口",
+              "     */",
+              "    inner class JsInterface",
+          ))
+          update_event_helper = "\n".join((
+              "    private fun emitAppUpdate(",
+              "        phase: String,",
+              "        progress: Int?,",
+              "        error: String?,",
+              "    ) {",
+              "        val detail = JSONObject().put(\"phase\", phase)",
+              "        if (progress != null) detail.put(\"progress\", progress)",
+              "        if (error != null) detail.put(\"error\", error)",
+              "        runOnUiThread {",
+              "            webView.evaluateJavascript(",
+              "                \"window.dispatchEvent(new CustomEvent('codex-mobile-app-update',{detail:${detail}}))\",",
+              "                null,",
+              "            )",
+              "        }",
+              "    }",
+              "",
+              interface_doc_anchor,
           ))
           if activity_source.count(webview_field) != 1:
               raise SystemExit("Pinned PakePlus WebView field changed")
@@ -307,6 +443,8 @@ jobs:
               raise SystemExit("Pinned PakePlus system-bar inset hook changed")
           if activity_source.count(js_interface_anchor) != 1:
               raise SystemExit("Pinned PakePlus JavaScript interface changed")
+          if activity_source.count(interface_doc_anchor) != 1:
+              raise SystemExit("Pinned PakePlus interface declaration changed")
           activity_path.write_text(
               activity_source
               .replace(
@@ -324,7 +462,164 @@ jobs:
                   safe_area_interface + js_interface_anchor,
                   1,
               )
+              .replace(
+                  interface_doc_anchor,
+                  update_event_helper,
+                  1,
+              )
           )
+
+          Path(
+              "app/src/main/java/com/app/pakeplus/AppUpdater.kt"
+          ).write_text(
+              r'''package com.app.pakeplus
+
+          import android.content.Intent
+          import android.net.Uri
+          import android.os.Build
+          import android.provider.Settings
+          import androidx.core.content.FileProvider
+          import java.io.File
+          import java.net.HttpURLConnection
+          import java.net.URL
+          import java.security.MessageDigest
+          import kotlin.concurrent.thread
+
+          class AppUpdater(
+              private val activity: MainActivity,
+              private val emit: (String, Int?, String?) -> Unit,
+          ) {
+              private val allowedPrefix =
+                  "https://github.com/loock-ai/codex-mobile/releases/download/"
+              private val allowedRedirectHosts = setOf(
+                  "github.com",
+                  "objects.githubusercontent.com",
+                  "release-assets.githubusercontent.com",
+              )
+
+              fun install(downloadUrl: String, sha256: String) {
+                  if (
+                      !downloadUrl.startsWith(allowedPrefix)
+                      || !downloadUrl.matches(Regex(""".+/CodexMobile-v\d+\.\d+\.\d+\.apk"""))
+                      || !sha256.matches(Regex("""[a-fA-F0-9]{64}"""))
+                  ) {
+                      emit("error", null, "更新地址或摘要无效")
+                      return
+                  }
+                  thread(name = "codex-mobile-update") {
+                      try {
+                          downloadAndInstall(downloadUrl, sha256.lowercase())
+                      } catch (error: Exception) {
+                          emit("error", null, error.message ?: "下载更新失败")
+                      }
+                  }
+              }
+
+              private fun downloadAndInstall(downloadUrl: String, sha256: String) {
+                  val connection = URL(downloadUrl).openConnection() as HttpURLConnection
+                  connection.instanceFollowRedirects = true
+                  connection.connectTimeout = 15_000
+                  connection.readTimeout = 30_000
+                  connection.setRequestProperty("Accept", "application/vnd.android.package-archive")
+                  connection.connect()
+                  if (
+                      connection.responseCode !in 200..299
+                      || connection.url.protocol != "https"
+                      || connection.url.host !in allowedRedirectHosts
+                  ) {
+                      throw IllegalStateException(
+                          "下载更新失败（HTTP ${connection.responseCode}）"
+                      )
+                  }
+
+                  val updates = File(activity.cacheDir, "updates").apply { mkdirs() }
+                  val apk = File(updates, "CodexMobile-update.apk")
+                  val digest = MessageDigest.getInstance("SHA-256")
+                  val total = connection.contentLengthLong
+                  var downloaded = 0L
+                  var lastProgress = -1
+                  connection.inputStream.use { input ->
+                      apk.outputStream().use { output ->
+                          val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                          while (true) {
+                              val count = input.read(buffer)
+                              if (count < 0) break
+                              output.write(buffer, 0, count)
+                              digest.update(buffer, 0, count)
+                              downloaded += count
+                              val progress =
+                                  if (total > 0) ((downloaded * 100) / total).toInt()
+                                  else 0
+                              if (progress != lastProgress) {
+                                  lastProgress = progress
+                                  emit("downloading", progress, null)
+                              }
+                          }
+                      }
+                  }
+                  connection.disconnect()
+                  emit("verifying", null, null)
+                  val actual = digest.digest().joinToString("") { "%02x".format(it) }
+                  if (!actual.equals(sha256, ignoreCase = true)) {
+                      apk.delete()
+                      throw SecurityException("安装包校验失败")
+                  }
+                  openInstaller(apk)
+              }
+
+              private fun openInstaller(apk: File) {
+                  activity.runOnUiThread {
+                      if (
+                          Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                          && !activity.packageManager.canRequestPackageInstalls()
+                      ) {
+                          activity.startActivity(
+                              Intent(
+                                  Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                  Uri.parse("package:${activity.packageName}"),
+                              )
+                          )
+                          emit("error", null, "请允许 Codex Mobile 安装未知应用后重试")
+                          return@runOnUiThread
+                      }
+                      val uri = FileProvider.getUriForFile(
+                          activity,
+                          "${activity.packageName}.fileprovider",
+                          apk,
+                      )
+                      emit("installing", null, null)
+                      activity.startActivity(
+                          Intent(Intent.ACTION_VIEW).apply {
+                              setDataAndType(
+                                  uri,
+                                  "application/vnd.android.package-archive",
+                              )
+                              addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                          }
+                      )
+                  }
+              }
+          }
+          '''.replace("\n          ", "\n").lstrip()
+          )
+
+          gradle_path = Path("app/build.gradle.kts")
+          gradle_source = gradle_path.read_text()
+          gradle_source, version_code_count = re.subn(
+              r"versionCode = \d+",
+              f"versionCode = {os.environ['APP_VERSION_CODE']}",
+              gradle_source,
+              count=1,
+          )
+          gradle_source, version_name_count = re.subn(
+              r'versionName = "[^"]+"',
+              f'versionName = "{os.environ["APP_VERSION"]}"',
+              gradle_source,
+              count=1,
+          )
+          if version_code_count != 1 or version_name_count != 1:
+              raise SystemExit("Pinned PakePlus version fields changed")
+          gradle_path.write_text(gradle_source)
           PY
           test -s app/src/main/assets/index.html
           find app/src/main/assets/assets -type f -name '*.js' -print -quit \
@@ -343,12 +638,32 @@ jobs:
             app/src/main/java/com/app/pakeplus/MainActivity.kt
           grep -Fq 'fun safeAreaTopCssPx(): Double' \
             app/src/main/java/com/app/pakeplus/MainActivity.kt
+          grep -Fq 'fun appVersion(): String' \
+            app/src/main/java/com/app/pakeplus/MainActivity.kt
+          grep -Fq 'fun installApk(' \
+            app/src/main/java/com/app/pakeplus/MainActivity.kt
+          grep -Fq 'MessageDigest.getInstance("SHA-256")' \
+            app/src/main/java/com/app/pakeplus/AppUpdater.kt
+          grep -Fq \
+            'https://github.com/loock-ai/codex-mobile/releases/download/' \
+            app/src/main/java/com/app/pakeplus/AppUpdater.kt
+          grep -Fq 'canRequestPackageInstalls' \
+            app/src/main/java/com/app/pakeplus/AppUpdater.kt
+          grep -Fq 'codex-mobile-app-update' \
+            app/src/main/java/com/app/pakeplus/MainActivity.kt
           grep -Fq \
             "document.documentElement.style.setProperty('--native-safe-area-top'" \
             app/src/main/java/com/app/pakeplus/MainActivity.kt
           grep -Fq "applicationId = \"$APP_ID\"" app/build.gradle.kts
+          grep -Fq "versionCode = $APP_VERSION_CODE" app/build.gradle.kts
           grep -Fq "versionName = \"$APP_VERSION\"" app/build.gradle.kts
           grep -Fq 'android:allowBackup="false"' app/src/main/AndroidManifest.xml
+          grep -Fq 'android.permission.REQUEST_INSTALL_PACKAGES' \
+            app/src/main/AndroidManifest.xml
+          grep -Fq '${applicationId}.fileprovider' \
+            app/src/main/AndroidManifest.xml
+          grep -Fq 'update_file_paths' app/src/main/AndroidManifest.xml
+          test -s app/src/main/res/xml/update_file_paths.xml
           if grep -Eq \
             'ACCESS_(FINE|COARSE)_LOCATION|CAMERA|RECORD_AUDIO|EXTERNAL_STORAGE|READ_MEDIA|SYSTEM_ALERT_WINDOW|dataExtractionRules|fullBackupContent' \
             app/src/main/AndroidManifest.xml; then
@@ -399,6 +714,7 @@ jobs:
           allowed_permissions = {
               "android.permission.INTERNET",
               "android.permission.ACCESS_NETWORK_STATE",
+              "android.permission.REQUEST_INSTALL_PACKAGES",
               dynamic_receiver_permission,
           }
           if permissions != allowed_permissions:
@@ -420,16 +736,84 @@ jobs:
           application = root.find("application")
           if application is None or application.get(f"{{{android}}}allowBackup") != "false":
               raise SystemExit("Final APK must disable application backup")
+          providers = {
+              element.get(f"{{{android}}}authorities", ""):
+                  element.get(f"{{{android}}}exported", "")
+              for element in application.findall("provider")
+          }
+          expected_provider = f"{os.environ['APP_ID']}.fileprovider"
+          if providers.get(expected_provider) != "false":
+              raise SystemExit(
+                  f"Final APK is missing the private update provider: {providers}"
+              )
           PY
           mkdir -p "$unpacked_assets"
           unzip -q "$artifact" 'assets/*' -d "$unpacked_assets"
           node "$RUNNER_TEMP/scan-mobile-assets.cjs" "$unpacked_assets/assets"
-          sha256sum "$artifact"
+          (
+            cd "$RUNNER_TEMP/apk"
+            sha256sum "CodexMobile-v${APP_VERSION}.apk" \
+              > "CodexMobile-v${APP_VERSION}.apk.sha256"
+          )
+          cat "$artifact.sha256"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: CodexMobile-android
-          path: ${{ runner.temp }}/apk/CodexMobile-v${{ env.APP_VERSION }}.apk
+          path: |
+            ${{ runner.temp }}/apk/CodexMobile-v${{ env.APP_VERSION }}.apk
+            ${{ runner.temp }}/apk/CodexMobile-v${{ env.APP_VERSION }}.apk.sha256
           if-no-files-found: error
           retention-days: 7
+
+  release:
+    name: Publish Codex Mobile Android
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified APK
+        uses: actions/download-artifact@v4
+        with:
+          name: CodexMobile-android
+          path: release
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_VERSION: ${{ needs.build.outputs.app_version }}
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          apk="release/CodexMobile-v${APP_VERSION}.apk"
+          checksum="${apk}.sha256"
+          test -s "$apk"
+          test -s "$checksum"
+          (
+            cd release
+            sha256sum --check "CodexMobile-v${APP_VERSION}.apk.sha256"
+          )
+          cleanup_draft() {
+            gh release delete "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --cleanup-tag \
+              --yes || true
+          }
+          trap cleanup_draft ERR INT TERM
+          gh release create "$RELEASE_TAG" \
+            "$apk" \
+            "$checksum" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Codex Mobile $RELEASE_TAG" \
+            --generate-notes \
+            --draft
+          gh release edit "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false \
+            --latest
+          trap - ERR INT TERM
