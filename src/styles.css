@@ -348,6 +348,11 @@ button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; 
 .turn-user { display: flex; justify-content: flex-end; min-width: 0; }
 .turn-user .user-bubble { margin-bottom: 16px; }
 .turn-responses { min-width: 0; max-width: 100%; padding-top: 2px; }
+.copy-action { position: relative; display: inline-flex; align-items: center; gap: 6px; color: #6f6f6f; }
+.copy-action > button { width: 32px; height: 32px; border: 0; border-radius: 10px; background: transparent; color: inherit; display: grid; place-items: center; padding: 0; }
+.copy-action > button svg { width: 19px; height: 19px; }
+.copy-action > small { color: #777; font-size: 11px; white-space: nowrap; }
+.turn-message-copy { margin: 7px 0 2px; }
 .previous-messages-toggle { width: 100%; border: 0; border-bottom: 1px solid #e5e5e5; background: transparent; padding: 11px 0 12px; display: flex; align-items: center; justify-content: flex-start; gap: 8px; color: #6f6f6f; text-align: left; font-size: 14px; }
 .previous-messages-toggle .chevron-icon { width: 15px; height: 15px; }
 .previous-messages { padding-top: 17px; }
@@ -358,7 +363,11 @@ button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; 
 .markdown-body ul, .markdown-body ol { padding-left: 1.4em; }
 .markdown-body blockquote { margin-left: 0; padding-left: 13px; border-left: 3px solid #ddd; color: #606060; }
 .markdown-body code { border-radius: 5px; background: #f0f0f0; padding: 2px 5px; font: .88em ui-monospace, SFMono-Regular, Menlo, monospace; }
-.markdown-body pre { overflow: auto; border-radius: 14px; background: #f5f5f5; padding: 13px; }
+.markdown-code-block { position: relative; margin: 0 0 13px; }
+.markdown-body .markdown-code-block pre { margin: 0; overflow: auto; border-radius: 14px; background: #f5f5f5; padding: 13px 48px 13px 13px; }
+.code-block-copy { position: absolute; top: 7px; right: 7px; }
+.code-block-copy > button { background: rgba(255,255,255,.86); box-shadow: 0 1px 6px rgba(0,0,0,.08); }
+.code-block-copy > small { position: absolute; top: 34px; right: 0; border-radius: 8px; background: rgba(255,255,255,.96); padding: 3px 6px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
 .markdown-body img, .markdown-body video { max-width: 100%; height: auto; }
 .markdown-body pre code { background: transparent; padding: 0; }
 .markdown-body table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }

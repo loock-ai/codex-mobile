@@ -13,6 +13,7 @@ import {
   toolActivityRowLabel,
   type ImageSource,
 } from "../../ui/conversation";
+import { CopyButton, visibleAssistantText } from "../../ui/copy";
 import { Chevron } from "../../ui/icons";
 import {
   RemoteFileLink,
@@ -233,6 +234,7 @@ export function TurnCard({
   const completed = splitCompletedTurnResponses(grouped.responses);
   const [showPrevious, setShowPrevious] = useState(false);
   const wasRunning = useRef(grouped.running);
+  const responsesRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (wasRunning.current && !grouped.running) setShowPrevious(false);
     wasRunning.current = grouped.running;
@@ -259,7 +261,7 @@ export function TurnCard({
           <UserBubble item={grouped.user} client={client} />
         </div>
       )}
-      <div className="turn-responses">
+      <div className="turn-responses" ref={responsesRef}>
         {grouped.running ? (
           <>
             {renderEntries(grouped.responses)}
@@ -297,7 +299,14 @@ export function TurnCard({
               </>
             )}
             {completed.final && (
-              <TimelineItem item={completed.final} client={client} />
+              <>
+                <TimelineItem item={completed.final} client={client} />
+                <CopyButton
+                  text={() => visibleAssistantText(responsesRef.current)}
+                  label="复制本回合 AI 消息"
+                  className="turn-message-copy"
+                />
+              </>
             )}
           </>
         )}

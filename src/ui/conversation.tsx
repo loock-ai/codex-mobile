@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { CopyButton, reactNodeText } from "./copy";
 
 export type ConversationRecord = Record<string, any>;
 
@@ -657,6 +658,21 @@ export function MarkdownMessage({
   className?: string;
 }) {
   const components = {
+    pre: ({ children }: { children?: ReactNode }) => {
+      const code = reactNodeText(children)
+        .replace(/^\n/, "")
+        .replace(/\n$/, "");
+      return (
+        <div className="markdown-code-block">
+          <pre>{children}</pre>
+          <CopyButton
+            text={code}
+            label="复制代码块"
+            className="code-block-copy"
+          />
+        </div>
+      );
+    },
     ...(renderImage
       ? {
           img: ({ src, alt }: { src?: string; alt?: string }) => (
