@@ -103,7 +103,7 @@ describe("移动 App 内置前端流水线", () => {
     expect(
       runAssetScanner(
         scanner,
-        'const docs = "https://react.dev/errors/"; const sample = "http://host.local:4173/?token=xxx"; const sentinel = "https://www.pakeplus.com/";',
+        'const docs = "https://react.dev/errors/"; const sample = "http://host.local:4173/?token=xxx"; const sentinel = "https://www.pakeplus.com/\0\b";',
       ).status,
     ).toBe(0);
     expect(hardenHost).toContain("app/src/main/assets/index.html");
@@ -114,6 +114,7 @@ describe("移动 App 内置前端流水线", () => {
       "DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
     );
     expect(verifyArtifact).toContain("protectionLevel");
+    expect(verifyArtifact).toContain('{"signature", "0x2"}');
     expect(verifyArtifact).toContain("CodexMobile-unpacked-assets");
     expect(verifyArtifact).toContain(
       'node "$RUNNER_TEMP/scan-mobile-assets.cjs" "$unpacked_assets/assets"',

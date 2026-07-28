@@ -103,7 +103,7 @@ jobs:
               /CODEX_MOBILE_TOKEN\s*=\s*["']?[A-Za-z0-9._~+\/=-]{8,}/g,
             ],
           ];
-          const urlPattern = /(?:https?|wss?):\/\/[^\s"'`<>\\]+/g;
+          const urlPattern = /(?:https?|wss?):\/\/[^\x00-\x20"'`<>\\]+/g;
           const textExtensions = new Set([
             ".css", ".html", ".js", ".json", ".map", ".plist", ".strings",
             ".svg", ".txt", ".xml",
