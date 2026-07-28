@@ -25,6 +25,7 @@ export function ThreadListPage({
   summaries,
   selectedBackendId,
   loadingBackendIds,
+  refreshing,
   threadListState,
   visibleThreads,
   totalThreadCount,
@@ -35,7 +36,6 @@ export function ThreadListPage({
   loadingProjectKeys,
   openingThreadId,
   query,
-  listNow,
   error,
   onQueryChange,
   onOpenThread,
@@ -51,6 +51,7 @@ export function ThreadListPage({
   summaries: Record<string, BackendRuntimeSummary>;
   selectedBackendId: string;
   loadingBackendIds: Set<string>;
+  refreshing: boolean;
   threadListState: ThreadListState;
   visibleThreads: AggregatedThreadItem[];
   totalThreadCount: number;
@@ -61,7 +62,6 @@ export function ThreadListPage({
   loadingProjectKeys: Set<string>;
   openingThreadId: string;
   query: string;
-  listNow: number;
   error: string;
   onQueryChange: (value: string) => void;
   onOpenThread: (thread: AggregatedThreadItem) => void | Promise<void>;
@@ -85,6 +85,7 @@ export function ThreadListPage({
     : undefined;
   const allGroups = splitAllThreads(visibleThreads);
   const projectGroups = groupThreadsByProject(visibleThreads, projectDirectories);
+  const renderNow = Math.floor(Date.now() / 1000);
   const renderRow = (
     thread: AggregatedThreadItem,
     showSource: boolean,
@@ -109,12 +110,11 @@ export function ThreadListPage({
           {thread.unread && (
             <i className="thread-unread-dot" aria-label="未读" />
           )}
-          <time>{relativeTime(thread.timestamp, listNow)}</time>
+          <time>{relativeTime(thread.timestamp, renderNow)}</time>
         </span>
       )}
       {showSource && (
         <small className="thread-source">
-          <i className="status-dot online" />
           {thread.backendName} · {thread.projectName}
         </small>
       )}
@@ -145,7 +145,12 @@ export function ThreadListPage({
             </p>
           </div>
           <div className="list-header-actions">
-            <button className="round-button" aria-label="刷新会话列表" onClick={onRefresh}>
+            <button
+              className={`round-button${refreshing ? " refreshing" : ""}`}
+              aria-label="刷新会话列表"
+              aria-busy={refreshing}
+              onClick={onRefresh}
+            >
               <AppIcon name="refresh" />
             </button>
             <button

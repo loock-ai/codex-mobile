@@ -89,6 +89,7 @@ import {
   readCollapsedProjectKeys,
   writeCollapsedProjectKeys,
 } from "./features/threads/project-collapse";
+import { useSidebarRefresh } from "./features/threads/sidebar-refresh";
 import {
   readUnreadThreadIds,
   shouldMarkThreadUnread,
@@ -103,6 +104,7 @@ interface BackendThreadSnapshot {
   projects: string[];
   projectThreadStates: Record<string, ProjectThreadLoadState>;
   loadingProjectCwd: string;
+  refreshing: boolean;
   threadListState: ThreadListState;
   openingThreadId: string;
   error: string;
@@ -154,6 +156,7 @@ function BackendWorkspace({
     Record<string, ProjectThreadLoadState>
   >({});
   const [loadingProjectCwd, setLoadingProjectCwd] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const [threadListState, setThreadListState] =
     useState<ThreadListState>("loading");
   const [active, setActive] = useState<AnyRecord | null>(null);
@@ -201,6 +204,7 @@ function BackendWorkspace({
   const olderTurnsGenerationRef = useRef(0);
   const olderTurnsLoadingRef = useRef(false);
   const fullyLoadedProjectCwdsRef = useRef(new Set<string>());
+  const refreshSequenceRef = useRef(0);
   const localPinnedKey = `codex-mobile:pinned:${backend.id}`;
   const readLocalPinned = () => {
     try {
@@ -362,6 +366,7 @@ function BackendWorkspace({
       projects,
       projectThreadStates,
       loadingProjectCwd,
+      refreshing,
       threadListState,
       openingThreadId,
       error,
@@ -376,21 +381,21 @@ function BackendWorkspace({
     projects,
     projectThreadStates,
     loadingProjectCwd,
+    refreshing,
   ]);
 
   useEffect(() => {
     if (!refreshVersion) return;
+    const sequence = ++refreshSequenceRef.current;
     fullyLoadedProjectCwdsRef.current.clear();
     setThreadListState((current) => (projects.length ? current : "loading"));
-    void loadThreads().catch(() => undefined);
+    setRefreshing(true);
+    void loadThreads()
+      .catch(() => undefined)
+      .finally(() => {
+        if (sequence === refreshSequenceRef.current) setRefreshing(false);
+      });
   }, [refreshVersion]);
-
-  useEffect(() => {
-    const refresh = window.setInterval(() => {
-      void loadThreads().catch(() => undefined);
-    }, 60_000);
-    return () => window.clearInterval(refresh);
-  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -1621,9 +1626,7 @@ function ConfiguredApp({
     () =>
       window.localStorage.getItem("codex-mobile:list-backend") || "all",
   );
-  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [query, setQuery] = useState("");
-  const [refreshVersion, setRefreshVersion] = useState(0);
   const [projectVisibleCounts, setProjectVisibleCounts] = useState<
     Record<string, number>
   >({});
@@ -1631,14 +1634,20 @@ function ConfiguredApp({
     readCollapsedProjectKeys(window.localStorage),
   );
   const loadedProjectsRef = useRef(new Set<string>());
-  const [listNow, setListNow] = useState(() =>
-    Math.floor(Date.now() / 1000),
-  );
   const [command, setCommand] = useState<WorkspaceCommand | null>(null);
   const commandIdRef = useRef(0);
   const edgeTouchStartRef = useRef<{ x: number; y: number } | null>(null);
-  const openSidebar = useCallback(() => setSidebarOpen(true), []);
-  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+  const resetListExpansion = useCallback(() => {
+    setProjectVisibleCounts({});
+    loadedProjectsRef.current.clear();
+  }, []);
+  const {
+    sidebarOpen,
+    refreshVersion,
+    openSidebar,
+    closeSidebar,
+    refresh: refreshAllBackends,
+  } = useSidebarRefresh(resetListExpansion);
   const selectListBackend = useCallback((backendId: string) => {
     window.localStorage.setItem("codex-mobile:list-backend", backendId);
     setListBackendId(backendId);
@@ -1696,7 +1705,7 @@ function ConfiguredApp({
 
   useEffect(() => {
     const handlePopState = () => {
-      if (sidebarOpen) setSidebarOpen(false);
+      if (sidebarOpen) closeSidebar();
     };
     const handleTouchStart = (event: TouchEvent) => {
       const touch = event.touches[0];
@@ -1730,15 +1739,7 @@ function ConfiguredApp({
       window.removeEventListener("touchmove", handleTouchMove);
       window.removeEventListener("touchend", handleTouchEnd);
     };
-  }, [openSidebar, sidebarOpen]);
-
-  useEffect(() => {
-    const timer = window.setInterval(
-      () => setListNow(Math.floor(Date.now() / 1000)),
-      60_000,
-    );
-    return () => window.clearInterval(timer);
-  }, []);
+  }, [closeSidebar, openSidebar, sidebarOpen]);
 
   const enabledBackends = useMemo(
     () => registry.backends.filter((backend) => backend.enabled),
@@ -1809,6 +1810,7 @@ function ConfiguredApp({
         previous.projects === snapshot.projects &&
         previous.projectThreadStates === snapshot.projectThreadStates &&
         previous.loadingProjectCwd === snapshot.loadingProjectCwd &&
+        previous.refreshing === snapshot.refreshing &&
         previous.threadListState === snapshot.threadListState &&
         previous.openingThreadId === snapshot.openingThreadId &&
         previous.error === snapshot.error
@@ -1890,6 +1892,9 @@ function ConfiguredApp({
         ),
       )
       .map((snapshot) => snapshot.backendId),
+  );
+  const refreshing = enabledBackends.some(
+    (backend) => snapshots[backend.id]?.refreshing,
   );
   const loadingProjectKeys = new Set(
     Object.values(snapshots)
@@ -2054,6 +2059,7 @@ function ConfiguredApp({
             summaries={summaries}
             selectedBackendId={listBackendId}
             loadingBackendIds={loadingBackendIds}
+            refreshing={refreshing}
             threadListState={threadListState}
             visibleThreads={scopedThreads}
             totalThreadCount={scopedThreadCount}
@@ -2064,19 +2070,13 @@ function ConfiguredApp({
             loadingProjectKeys={loadingProjectKeys}
             openingThreadId={openingThreadId}
             query={query}
-            listNow={listNow}
             error={listError}
             onQueryChange={setQuery}
             onOpenThread={openThread}
             onNewChat={startNewChat}
             onSelectBackend={selectListBackend}
             onManageBackends={() => setManagerOpen(true)}
-            onRefresh={() => {
-              setListNow(Math.floor(Date.now() / 1000));
-              setProjectVisibleCounts({});
-              loadedProjectsRef.current.clear();
-              setRefreshVersion((current) => current + 1);
-            }}
+            onRefresh={refreshAllBackends}
             onToggleProject={toggleProject}
             onToggleProjectCollapsed={toggleProjectCollapsed}
             onRetryProject={retryProject}

@@ -49,6 +49,7 @@ function renderList(
   {
     collapsedProjectKeys = new Set<string>(),
     loadingBackendIds = new Set<string>(),
+    refreshing = false,
     projectDirectories = ["/tmp/project-a", "/tmp/project-b"],
     projectThreadStates = {},
     query = "",
@@ -57,6 +58,7 @@ function renderList(
   }: {
     collapsedProjectKeys?: Set<string>;
     loadingBackendIds?: Set<string>;
+    refreshing?: boolean;
     projectDirectories?: string[];
     projectThreadStates?: Record<string, "loading" | "ready" | "error">;
     query?: string;
@@ -77,10 +79,10 @@ function renderList(
       collapsedProjectKeys={collapsedProjectKeys}
       loadingProjectKeys={new Set()}
       loadingBackendIds={loadingBackendIds}
+      refreshing={refreshing}
       projectThreadStates={projectThreadStates}
       openingThreadId=""
       query={query}
-      listNow={100}
       error=""
       onQueryChange={() => undefined}
       onOpenThread={() => undefined}
@@ -113,9 +115,23 @@ describe("会话侧边栏列表", () => {
     expect(view.getByRole("heading", { name: "置顶" })).not.toBeNull();
     expect(view.getByRole("heading", { name: "最近" })).not.toBeNull();
     expect(view.getAllByText("置顶会话")).toHaveLength(1);
-    expect(view.getByText("Mac mini · project-a")).not.toBeNull();
-    expect(view.getByText("Mac mini · project-b")).not.toBeNull();
+    const projectA = view.getByText("Mac mini · project-a");
+    const projectB = view.getByText("Mac mini · project-b");
+    expect(projectA).not.toBeNull();
+    expect(projectB).not.toBeNull();
+    expect(projectA.closest(".thread-source")?.querySelector(".status-dot")).toBeNull();
+    expect(projectB.closest(".thread-source")?.querySelector(".status-dot")).toBeNull();
     expect(view.getByLabelText("进行中")).not.toBeNull();
+  });
+
+  it("刷新期间只让右上角刷新按钮显示旋转状态", () => {
+    const { container } = renderList("all", { refreshing: true });
+    const refresh = within(container).getByRole("button", {
+      name: "刷新会话列表",
+    });
+
+    expect(refresh.getAttribute("aria-busy")).toBe("true");
+    expect(refresh.classList.contains("refreshing")).toBe(true);
   });
 
   it("单机视图只按项目分组且行内不重复机器项目", () => {
@@ -246,6 +262,7 @@ describe("会话侧边栏列表", () => {
   });
 
   it("在未查看会话的右侧时间前显示蓝点", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(100_000);
     const unreadThreads = threads.map((thread) =>
       thread.threadId === "pinned" ? { ...thread, unread: true } : thread,
     );
@@ -262,10 +279,10 @@ describe("会话侧边栏列表", () => {
         collapsedProjectKeys={new Set()}
         loadingProjectKeys={new Set()}
         loadingBackendIds={new Set()}
+        refreshing={false}
         projectThreadStates={{}}
         openingThreadId=""
         query=""
-        listNow={100}
         error=""
         onQueryChange={() => undefined}
         onOpenThread={() => undefined}
@@ -285,5 +302,6 @@ describe("会话侧边栏列表", () => {
     expect(meta).not.toBeNull();
     expect(within(meta as HTMLElement).getByText("1 分钟")).not.toBeNull();
     expect(meta?.firstElementChild).toBe(unread);
+    now.mockRestore();
   });
 });

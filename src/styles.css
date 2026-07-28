@@ -39,6 +39,7 @@ button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; 
 .backend-switcher { max-width: 100%; margin: 10px -16px 7px; padding: 2px 16px; display: flex; align-items: center; gap: 8px; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: none; }
 .backend-switcher::-webkit-scrollbar { display: none; }
 .backend-pill { flex: 0 0 auto; min-height: 44px; border: 0; border-radius: 22px; background: #ededed; display: inline-flex; align-items: center; gap: 6px; padding: 8px 13px; font-size: 13px; }
+.backend-pill.all-backends { min-height: 38px; border-radius: 19px; padding: 6px 12px; font-size: 12px; }
 .backend-pill[aria-pressed="true"] { background: #111; color: #fff; }
 .backend-pill .status-dot { margin: 0; }
 .backend-pill .backend-loading { width: 13px; height: 13px; border-width: 2px; }
@@ -97,8 +98,8 @@ button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; 
 .thread-unread-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: #1976f3; }
 .thread-row-meta { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; white-space: nowrap; }
 .thread-row time { color: #686868; font-size: 13px; }
-.thread-source { grid-column: 1 / -1; min-width: 0; overflow: hidden; color: #777; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.thread-source .status-dot { width: 7px; height: 7px; margin-right: 6px; }
+.thread-source { grid-column: 1 / -1; min-width: 0; overflow: hidden; color: #777; text-align: right; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.list-header-actions .round-button.refreshing svg { animation: thread-spin .8s linear infinite; }
 .thread-list-skeleton { display: grid; }
 .thread-row-skeleton { min-width: 0; height: 2em; display: grid; grid-template-columns: minmax(0, 1fr) 42px; gap: 18px; align-items: center; }
 .thread-row-skeleton i { display: block; height: 9px; border-radius: 999px; background: #ececec; animation: thread-skeleton-pulse 1.35s ease-in-out infinite; }
