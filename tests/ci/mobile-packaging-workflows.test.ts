@@ -252,6 +252,7 @@ describe("移动 App 内置前端流水线", () => {
     );
     expect(hardenHost).toContain("MessageDigest.getInstance(\"SHA-256\")");
     expect(hardenHost).toContain("fun appVersion(): String");
+    expect(hardenHost).toContain("getPackageInfo");
     expect(hardenHost).toContain("fun installApk(");
     expect(hardenHost).toContain("codex-mobile-app-update");
     expect(hardenHost).toContain("canRequestPackageInstalls");
