@@ -159,6 +159,18 @@ describe("悬浮状态布局", () => {
     );
   });
 
+  it("App 下载进度条使用中性灰而不是绿色", () => {
+    const progressRule =
+      styles.match(
+        /(?:^|\n)\.app-update-progress i\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+
+    expect(progressRule).toContain(
+      "background: linear-gradient(90deg, #d6d6d6, #bdbdbd)",
+    );
+    expect(progressRule).not.toContain("#d4f2da");
+  });
+
   it("普通手机浏览器单独增加上下边缘间距且不改变 WebView", () => {
     const rootRule =
       styles.match(/(?:^|\n):root\s*\{([^}]*)\}/)?.[1] ?? "";
