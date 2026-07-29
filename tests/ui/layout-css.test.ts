@@ -141,16 +141,21 @@ describe("悬浮状态布局", () => {
     expect(rule).toContain("white-space: nowrap");
   });
 
-  it("流式字符提示在工具长时间运行时仍保留轻量接收动效", () => {
-    const iconRule =
+  it("流式字符提示使用清晰的旋转圆环 Loading", () => {
+    const ringRule =
       styles.match(
-        /(?:^|\n)\.stream-character-count svg\s*\{([^}]*)\}/,
+        /(?:^|\n)\.stream-character-spinner\s*\{([^}]*)\}/,
       )?.[1] ?? "";
 
-    expect(iconRule).toContain("animation: stream-receiving");
+    expect(ringRule).toContain("background: conic-gradient(");
+    expect(ringRule).toContain("#929292");
+    expect(ringRule).toContain("#cecece");
+    expect(ringRule).toContain("mask:");
+    expect(ringRule).toContain("animation: stream-receiving");
+    expect(styles).not.toContain(".stream-character-spinner::after");
     expect(styles).toContain("@keyframes stream-receiving");
     expect(styles).toContain(
-      "@media (prefers-reduced-motion: reduce) { .stream-character-count svg { animation: none; } }",
+      "@media (prefers-reduced-motion: reduce) { .stream-character-spinner { animation: none; } }",
     );
   });
 

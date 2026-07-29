@@ -271,6 +271,7 @@ describe("移动端对话格式", () => {
     expect(view.getByLabelText("已接收 21 字符").textContent).toBe("21 字符");
     expect(container.querySelectorAll(".stream-character-count"))
       .toHaveLength(1);
+    expect(container.querySelector(".stream-character-spinner")).not.toBeNull();
     expect(
       container.querySelector(".turn-responses")?.lastElementChild,
     ).toBe(container.querySelector(".stream-character-count"));
@@ -283,6 +284,40 @@ describe("移动端对话格式", () => {
     );
     view = within(container);
     expect(view.queryByLabelText(/已接收 \d+ 字符/)).toBeNull();
+  });
+
+  it("运行中和完成后的对话时间线都不展示代码变更卡片", () => {
+    const turn = {
+      id: "turn-with-live-diff",
+      status: "inProgress",
+      liveDiff: "@@ -1 +1 @@\n-old\n+new",
+      items: [
+        { id: "u1", type: "userMessage", text: "修改文件" },
+        { id: "a1", type: "agentMessage", text: "正在处理" },
+      ],
+    };
+    const { container, rerender } = render(
+      <TurnCard
+        turn={turn}
+        liveDiff={turn.liveDiff}
+        client={null}
+      />,
+    );
+    let view = within(container);
+
+    expect(view.queryByText("代码变更")).toBeNull();
+    expect(container.querySelector(".diff-card")).toBeNull();
+
+    rerender(
+      <TurnCard
+        turn={{ ...turn, status: "completed" }}
+        liveDiff={turn.liveDiff}
+        client={null}
+      />,
+    );
+    view = within(container);
+    expect(view.queryByText("代码变更")).toBeNull();
+    expect(container.querySelector(".diff-card")).toBeNull();
   });
 
   it("没有用户消息的回合不显示伪用户气泡", () => {

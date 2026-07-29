@@ -16,7 +16,6 @@ import {
   type ImageSource,
 } from "../../ui/conversation";
 import { CopyButton, visibleAssistantText } from "../../ui/copy";
-import { AppIcon } from "../../ui/app-display";
 import { Chevron } from "../../ui/icons";
 import {
   RemoteFileLink,
@@ -241,7 +240,7 @@ function StreamCharacterCount({ count }: { count: number }) {
       className="stream-character-count"
       aria-label={`已接收 ${count} 字符`}
     >
-      <AppIcon name="download" />
+      <i className="stream-character-spinner" aria-hidden="true" />
       <span>{count} 字符</span>
     </div>
   );
@@ -310,7 +309,6 @@ export function receivedItemCharacterCount(item: AnyRecord) {
 
 export function TurnCard({
   turn,
-  liveDiff,
   client,
 }: {
   turn: AnyRecord;
@@ -370,12 +368,6 @@ export function TurnCard({
         {grouped.running ? (
           <>
             {renderEntries(grouped.responses)}
-            {liveDiff && (
-              <details className="tool-card diff-card" open>
-                <summary>代码变更</summary>
-                <pre>{liveDiff}</pre>
-              </details>
-            )}
             <StreamCharacterCount count={streamingCharacterCount} />
           </>
         ) : (
@@ -384,7 +376,6 @@ export function TurnCard({
               key={items[0]?.id ?? index}
               items={items}
               client={client}
-              liveDiff={index === copySegmentIndex ? liveDiff : undefined}
               copyTarget={responsesRef}
               showCopy={index === copySegmentIndex}
             />
@@ -398,13 +389,11 @@ export function TurnCard({
 function CompletedResponseSegment({
   items,
   client,
-  liveDiff,
   copyTarget,
   showCopy,
 }: {
   items: AnyRecord[];
   client: AppServerClient | null;
-  liveDiff?: string;
   copyTarget: RefObject<HTMLDivElement | null>;
   showCopy: boolean;
 }) {
@@ -457,12 +446,6 @@ function CompletedResponseSegment({
         </>
       )}
       {!showPrevious && renderUnfoldedEntries(completed.beforeFinal)}
-      {showPrevious && liveDiff && (
-        <details className="tool-card diff-card">
-          <summary>代码变更</summary>
-          <pre>{liveDiff}</pre>
-        </details>
-      )}
       {completed.final && (
         <>
           <TimelineItem item={completed.final} client={client} />

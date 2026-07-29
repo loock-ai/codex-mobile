@@ -204,17 +204,15 @@ button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; 
 .user-markdown a { overflow-wrap: anywhere; }
 .assistant-message { margin: 0 0 22px; font-size: 16px; line-height: 1.68; overflow-wrap: anywhere; }
 .stream-character-count { margin-top: 7px; display: flex; align-items: center; gap: 4px; color: #999; font-size: 11px; line-height: 1.2; }
-.stream-character-count svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; animation: stream-receiving 1.15s ease-in-out infinite; }
-@keyframes stream-receiving { 50% { opacity: .55; transform: translateY(2px); } }
-@media (prefers-reduced-motion: reduce) { .stream-character-count svg { animation: none; } }
+.stream-character-spinner { width: 13px; height: 13px; flex: 0 0 auto; border-radius: 50%; background: conic-gradient(from 0deg, transparent 0deg 36deg, #cecece 92deg, #c1c1c1 170deg, #adadad 250deg, #929292 330deg 360deg); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 0); mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 0); animation: stream-receiving .78s linear infinite; }
+@keyframes stream-receiving { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .stream-character-spinner { animation: none; } }
 .context-compaction { width: 100%; margin: 13px 0 20px; display: grid; grid-template-columns: minmax(24px,1fr) auto auto minmax(24px,1fr); align-items: center; gap: 7px; color: #777; font-size: 12px; line-height: 1; }
 .context-compaction::before, .context-compaction::after { content: ""; height: 1px; background: #e5e5e5; }
 .context-compaction span { color: #8a8a8a; font-size: 15px; line-height: 1; }
 .context-compaction strong { font-weight: 550; white-space: nowrap; }
 .reasoning { margin: 0 0 16px; color: #6a6a6a; font-size: 14px; line-height: 1.55; }
-.tool-card { margin: 0 0 20px; border: 1px solid #e5e5e5; border-radius: 18px; padding: 13px 15px; background: #fafafa; font-size: 14px; }
-.tool-card summary { font-weight: 650; cursor: pointer; }
-.tool-card pre, .approval-sheet pre { margin: 13px 0 0; overflow: auto; white-space: pre-wrap; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.approval-sheet pre { margin: 13px 0 0; overflow: auto; white-space: pre-wrap; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .tool-activity { margin: 2px 0 20px; color: #737373; }
 .tool-activity > summary { min-width: 0; display: grid; grid-template-columns: 24px minmax(0,1fr) 18px; align-items: center; gap: 4px; list-style: none; cursor: pointer; font-size: 14px; }
 .tool-activity > summary::-webkit-details-marker { display: none; }
