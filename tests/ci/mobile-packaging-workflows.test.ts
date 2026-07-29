@@ -306,6 +306,24 @@ describe("移动 App 内置前端流水线", () => {
     );
     const scanner = readAssetScanner(workflow);
 
+    expect(workflow.on?.push?.branches).toEqual(["main"]);
+    expect(workflow.on?.push?.paths).toEqual(
+      expect.arrayContaining([
+        "src/**",
+        "public/**",
+        "index.html",
+        "package.json",
+        "package-lock.json",
+        "vite.config.ts",
+        "docs/assets/app-icon/codex-mobile-app-icon-1024.png",
+        "scripts/compose-mobile-app-icon.sh",
+        ".github/workflows/build-ios.yml",
+      ]),
+    );
+    expect(workflow.on).toHaveProperty("workflow_dispatch");
+    expect(workflow.concurrency).toMatchObject({
+      "cancel-in-progress": true,
+    });
     expect(installIcon).toContain(
       "docs/assets/app-icon/codex-mobile-app-icon-1024.png",
     );

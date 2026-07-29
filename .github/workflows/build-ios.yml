@@ -1,10 +1,28 @@
 name: Build iOS App
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "public/**"
+      - "index.html"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
+      - "vite.config.ts"
+      - "docs/assets/app-icon/codex-mobile-app-icon-1024.png"
+      - "scripts/compose-mobile-app-icon.sh"
+      - ".github/workflows/build-ios.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   APP_NAME: CodexMobile
