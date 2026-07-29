@@ -5,13 +5,17 @@ import {
   within,
 } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { TurnCard } from "../../src/features/conversation/Timeline";
+import {
+  receivedItemCharacterCount,
+  TurnCard,
+} from "../../src/features/conversation/Timeline";
 import {
   applyCompletedTurn,
   applyFileChangePatch,
   applyTurnDiff,
   applyTurnItem,
   applyTurnStarted,
+  automationAgentMessageText,
   MarkdownMessage,
   groupConversationTurns,
   groupTimelineEntries,
@@ -25,6 +29,7 @@ import {
   parseUnifiedDiff,
   shouldCollapseUserMessage,
   splitCompletedTurnResponses,
+  splitTurnResponseSegments,
   stripGitDirectives,
   summarizeToolActivity,
   summarizeFileChange,
@@ -221,6 +226,63 @@ describe("移动端对话格式", () => {
     expect(view.queryByText("准备执行")).toBeNull();
     expect(view.queryByText("测试进行中")).toBeNull();
     expect(view.queryByText("测试完成")).not.toBeNull();
+  });
+
+  it("流式字符统计从用户发送后出现，始终位于回合末尾并在结束后隐藏", () => {
+    const running = {
+      id: "turn-stream-count",
+      status: "inProgress",
+      items: [
+        { id: "u1", type: "userMessage", text: "先介绍上海" },
+        { id: "a1", type: "agentMessage", text: "上海旧回复" },
+        { id: "u2", type: "userMessage", text: "改成北京" },
+        { id: "a2", type: "agentMessage", text: "北京😀" },
+        {
+          id: "c1",
+          type: "commandExecution",
+          command: "printf OK",
+          aggregatedOutput: "OK\n",
+        },
+        { id: "a3", type: "agentMessage", text: "继续" },
+        {
+          id: "c2",
+          type: "commandExecution",
+          command: "pwd",
+          aggregatedOutput: ".",
+        },
+      ],
+    };
+    const { container, rerender } = render(
+      <TurnCard
+        turn={{
+          ...running,
+          items: [running.items[0]],
+        }}
+        client={null}
+      />,
+    );
+    let view = within(container);
+
+    expect(view.getByLabelText("已接收 0 字符").textContent).toBe("0 字符");
+
+    rerender(<TurnCard turn={running} client={null} />);
+    view = within(container);
+    expect(receivedItemCharacterCount(running.items[4])).toBe(12);
+    expect(view.getByLabelText("已接收 21 字符").textContent).toBe("21 字符");
+    expect(container.querySelectorAll(".stream-character-count"))
+      .toHaveLength(1);
+    expect(
+      container.querySelector(".turn-responses")?.lastElementChild,
+    ).toBe(container.querySelector(".stream-character-count"));
+
+    rerender(
+      <TurnCard
+        turn={{ ...running, status: "completed" }}
+        client={null}
+      />,
+    );
+    view = within(container);
+    expect(view.queryByLabelText(/已接收 \d+ 字符/)).toBeNull();
   });
 
   it("没有用户消息的回合不显示伪用户气泡", () => {
@@ -502,6 +564,104 @@ describe("移动端对话格式", () => {
     expect(result.final).toBe(final);
     expect(result.previous).toEqual([early, command]);
     expect(result.previousCount).toBe(2);
+    expect(result.beforeFinal).toEqual([early, command]);
+    expect(result.afterFinal).toEqual([]);
+  });
+
+  it("本轮后续的人类引导保持用户气泡且不计入 AI 过程折叠", () => {
+    const command = { id: "c-steer", type: "commandExecution" };
+    const steer = {
+      id: "u-steer",
+      type: "userMessage",
+      text: "先修复失败测试，再继续构建",
+    };
+    const final = {
+      id: "a-steer",
+      type: "agentMessage",
+      phase: "final_answer",
+      text: "已经完成",
+    };
+    const result = splitCompletedTurnResponses([command, steer, final]);
+
+    expect(result.previousCount).toBe(1);
+
+    const { container } = render(
+      <TurnCard
+        turn={{
+          id: "turn-steered",
+          status: "completed",
+          items: [
+            { id: "u-initial", type: "userMessage", text: "处理这个问题" },
+            command,
+            steer,
+            final,
+          ],
+        }}
+        client={null}
+      />,
+    );
+    const view = within(container);
+    const steerText = view.getByText("先修复失败测试，再继续构建");
+
+    expect(steerText.closest(".user-bubble")).not.toBeNull();
+    expect(
+      view.getByRole("button", { name: "之前的 1 条消息" }),
+    ).not.toBeNull();
+    expect(
+      view.queryByRole("button", { name: "之前的 2 条消息" }),
+    ).toBeNull();
+  });
+
+  it("人类引导把同一 Turn 切成独立显示段且单条 AI 回复不折叠", () => {
+    const earlyAnswer = {
+      id: "a-shanghai",
+      type: "agentMessage",
+      phase: "final_answer",
+      text: "上海是一座现代化城市",
+    };
+    const steer = {
+      id: "u-beijing",
+      type: "userMessage",
+      text: "改北京的介绍吧",
+    };
+    const finalAnswer = {
+      id: "a-beijing",
+      type: "agentMessage",
+      phase: "final_answer",
+      text: "北京是古都与现代活力交融的城市",
+    };
+
+    expect(
+      splitTurnResponseSegments([earlyAnswer, steer, finalAnswer]),
+    ).toEqual([
+      [earlyAnswer],
+      [steer, finalAnswer],
+    ]);
+
+    const { container } = render(
+      <TurnCard
+        turn={{
+          id: "turn-steered-once",
+          status: "completed",
+          items: [
+            { id: "u-shanghai", type: "userMessage", text: "介绍上海" },
+            earlyAnswer,
+            steer,
+            finalAnswer,
+          ],
+        }}
+        client={null}
+      />,
+    );
+    const view = within(container);
+
+    expect(view.getByText("上海是一座现代化城市")).not.toBeNull();
+    expect(view.getByText("改北京的介绍吧").closest(".user-bubble"))
+      .not.toBeNull();
+    expect(
+      view.getByText("北京是古都与现代活力交融的城市"),
+    ).not.toBeNull();
+    expect(view.queryByRole("button", { name: /之前的/ })).toBeNull();
   });
 
   it("没有 AI 最终回复时不丢弃过程 item", () => {
@@ -510,7 +670,123 @@ describe("移动端对话格式", () => {
       final: null,
       previous: [command],
       previousCount: 1,
+      beforeFinal: [command],
+      afterFinal: [],
     });
+  });
+
+  it("上下文压缩提示不计入折叠数量，并随历史消息一起展开", () => {
+    const compaction = { id: "compact-1", type: "contextCompaction" };
+    const result = splitCompletedTurnResponses([
+      { id: "c1", type: "commandExecution" },
+      compaction,
+      {
+        id: "a1",
+        type: "agentMessage",
+        phase: "final_answer",
+        text: "继续完成任务",
+      },
+    ]);
+
+    expect(result.previous).toEqual([
+      { id: "c1", type: "commandExecution" },
+      compaction,
+    ]);
+    expect(result.previousCount).toBe(1);
+
+    const { container } = render(
+      <TurnCard
+        turn={{
+          id: "turn-compact",
+          status: "completed",
+          items: [
+            { id: "u1", type: "userMessage", text: "继续" },
+            { id: "c1", type: "commandExecution" },
+            compaction,
+            {
+              id: "a1",
+              type: "agentMessage",
+              phase: "final_answer",
+              text: "继续完成任务",
+            },
+          ],
+        }}
+        client={null}
+      />,
+    );
+    const view = within(container);
+
+    expect(view.queryByText("上下文已压缩")).toBeNull();
+    const previousButton = view.getByRole("button", {
+      name: "之前的 1 条消息",
+    });
+    fireEvent.click(previousButton);
+    expect(view.getByRole("separator", { name: "上下文已压缩" })).not.toBeNull();
+    const compactionNode = view.getByText("上下文已压缩");
+    const finalNode = view.getByText("继续完成任务");
+    expect(
+      compactionNode.compareDocumentPosition(finalNode) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+
+    const after = render(
+      <TurnCard
+        turn={{
+          id: "turn-compact-after",
+          status: "completed",
+          items: [
+            { id: "u2", type: "userMessage", text: "继续" },
+            { id: "c2", type: "commandExecution" },
+            {
+              id: "a2",
+              type: "agentMessage",
+              phase: "final_answer",
+              text: "先完成回复",
+            },
+            { id: "compact-2", type: "contextCompaction" },
+          ],
+        }}
+        client={null}
+      />,
+    );
+    const afterView = within(after.container);
+    expect(afterView.queryByText("上下文已压缩")).toBeNull();
+    fireEvent.click(
+      afterView.getByRole("button", { name: "之前的 1 条消息" }),
+    );
+    expect(
+      afterView
+        .getByText("先完成回复")
+        .compareDocumentPosition(afterView.getByText("上下文已压缩")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+
+    const standalone = render(
+      <TurnCard
+        turn={{
+          id: "turn-compact-only",
+          status: "completed",
+          items: [
+            { id: "u3", type: "userMessage", text: "继续" },
+            {
+              id: "a3",
+              type: "agentMessage",
+              phase: "final_answer",
+              text: "完成回复",
+            },
+            { id: "compact-3", type: "contextCompaction" },
+          ],
+        }}
+        client={null}
+      />,
+    );
+    const standaloneView = within(standalone.container);
+    expect(standaloneView.queryByRole("button", {
+      name: /之前的/,
+    })).toBeNull();
+    expect(
+      standaloneView.getByRole("separator", { name: "上下文已压缩" }),
+    ).not.toBeNull();
   });
 
   it("turn/completed 只合并最终摘要，不丢失本地累计的完整过程", () => {
@@ -786,6 +1062,36 @@ describe("移动端对话格式", () => {
       instructions: null,
       message: "趋势观察已完成。",
     });
+  });
+
+  it("恢复消息保留正常正文并移除末尾自动化 heartbeat 标签", () => {
+    expect(
+      automationAgentMessageText(
+        [
+          "已创建提交 fff5923，未 push。",
+          "",
+          "<heartbeat>",
+          "<automation_id>agent</automation_id>",
+          "<decision>NOTIFY</decision>",
+          "<message>已完成 Agent 开发动态整理。</message>",
+          "</heartbeat>",
+        ].join("\n"),
+      ),
+    ).toBe("已创建提交 fff5923，未 push。");
+  });
+
+  it("整条 AI 消息只有 heartbeat 时继续展示 message 正文", () => {
+    expect(
+      automationAgentMessageText(
+        [
+          "<heartbeat>",
+          "<automation_id>agent</automation_id>",
+          "<decision>NOTIFY</decision>",
+          "<message>已完成 Agent 开发动态整理。</message>",
+          "</heartbeat>",
+        ].join("\n"),
+      ),
+    ).toBe("已完成 Agent 开发动态整理。");
   });
 
   it("不解析普通正文、代码示例和缺少自动化 ID 的 heartbeat", () => {

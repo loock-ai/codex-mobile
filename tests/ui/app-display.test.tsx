@@ -20,4 +20,14 @@ describe("应用展示辅助函数", () => {
       expect(icon?.childElementCount).toBeGreaterThan(0);
     },
   );
+
+  it("接收字符图标只保留向下箭头，不展示下载横线", () => {
+    const { container } = render(<AppIcon name="download" />);
+    const paths = Array.from(container.querySelectorAll("path"));
+
+    expect(paths).toHaveLength(2);
+    expect(paths.map((path) => path.getAttribute("d"))).not.toContain(
+      "M5 20h14",
+    );
+  });
 });

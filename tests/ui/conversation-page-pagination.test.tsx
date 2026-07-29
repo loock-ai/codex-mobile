@@ -1,4 +1,4 @@
-import { createRef } from "react";
+import { createRef, type FormEvent } from "react";
 import { fireEvent, render, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ConversationPage } from "../../src/features/conversation/ConversationPage";
@@ -6,7 +6,17 @@ import { ConversationPage } from "../../src/features/conversation/ConversationPa
 function renderConversation(
   olderTurnsState: "idle" | "loading" | "error" | "exhausted",
   onLoadOlderTurns = vi.fn().mockResolvedValue(true),
+  composer: {
+    draft?: string;
+    busy?: boolean;
+    steering?: boolean;
+    steerable?: boolean;
+    pendingSteerText?: string;
+    onSubmit?: (event: FormEvent) => void;
+  } = {},
+  onRetry = vi.fn(),
 ) {
+  const onSubmit = composer.onSubmit ?? vi.fn();
   const result = render(
     <ConversationPage
       active={{
@@ -25,10 +35,13 @@ function renderConversation(
       connection="online"
       client={null}
       error=""
-      draft=""
+      draft={composer.draft ?? ""}
       draftImages={[]}
       imageReading={false}
-      busy={false}
+      busy={composer.busy ?? false}
+      steering={composer.steering ?? false}
+      steerable={composer.steerable ?? true}
+      pendingSteerText={composer.pendingSteerText ?? ""}
       tokenUsage={null}
       rateLimits={null}
       pendingAction=""
@@ -43,9 +56,9 @@ function renderConversation(
       onPin={async () => true}
       onRename={async () => true}
       onArchive={async () => true}
-      onRetry={() => undefined}
+      onRetry={onRetry}
       onLoadOlderTurns={onLoadOlderTurns}
-      onSubmit={() => undefined}
+      onSubmit={onSubmit}
       onRemoveImage={() => undefined}
       onSelectImages={async () => undefined}
       onOpenAgentSettings={() => undefined}
@@ -54,7 +67,7 @@ function renderConversation(
       onInterrupt={() => undefined}
     />,
   );
-  return { ...result, onLoadOlderTurns };
+  return { ...result, onLoadOlderTurns, onSubmit, onRetry };
 }
 
 describe("会话详情历史分页", () => {
@@ -69,6 +82,23 @@ describe("会话详情历史分页", () => {
     expect(
       within(group).getByRole("button", { name: "会话操作" }),
     ).not.toBeNull();
+  });
+
+  it("会话操作菜单可以刷新当前会话并自动关闭", () => {
+    const onRetry = vi.fn();
+    const { container } = renderConversation(
+      "exhausted",
+      undefined,
+      {},
+      onRetry,
+    );
+    const view = within(container);
+
+    fireEvent.click(view.getByRole("button", { name: "会话操作" }));
+    fireEvent.click(view.getByRole("button", { name: "刷新会话" }));
+
+    expect(onRetry).toHaveBeenCalledOnce();
+    expect(view.queryByRole("region", { name: "会话操作" })).toBeNull();
   });
 
   it("用户上滑后不显示悬浮回到底部按钮", () => {
@@ -103,5 +133,74 @@ describe("会话详情历史分页", () => {
 
     expect(view.getByText("加载失败，点击重试")).not.toBeNull();
     expect(view.getByText("分页会话")).not.toBeNull();
+  });
+
+  it("任务执行中输入内容后，停止按钮直接变成引导发送按钮", () => {
+    const onSubmit = vi.fn((event: FormEvent) => event.preventDefault());
+    const { container } = renderConversation(
+      "exhausted",
+      undefined,
+      { draft: "先处理测试", busy: true, onSubmit },
+    );
+    const view = within(container);
+    const steer = view.getByRole("button", { name: "引导" });
+
+    expect(steer.getAttribute("type")).toBe("submit");
+    expect(view.queryByRole("button", { name: "停止" })).toBeNull();
+    fireEvent.click(steer);
+    expect(onSubmit).toHaveBeenCalledOnce();
+  });
+
+  it("任务执行中没有输入时保留停止按钮，引导提交中显示等待状态", () => {
+    const idle = renderConversation(
+      "exhausted",
+      undefined,
+      { busy: true },
+    );
+    expect(
+      within(idle.container).getByRole("button", { name: "停止" }),
+    ).not.toBeNull();
+    idle.unmount();
+
+    const pending = renderConversation(
+      "exhausted",
+      undefined,
+      { draft: "继续", busy: true, steering: true },
+    );
+    const steering = within(pending.container).getByRole("button", {
+      name: "正在引导",
+    });
+    expect(steering.getAttribute("disabled")).not.toBeNull();
+  });
+
+  it("引导发送后在输入框上方临时展示单行消息", () => {
+    const { container } = renderConversation(
+      "exhausted",
+      undefined,
+      {
+        busy: true,
+        pendingSteerText:
+          "先完成当前检查，再根据测试结果调整实现并重新运行完整测试",
+      },
+    );
+    const view = within(container);
+    const preview = view.getByRole("status", { name: "已发送引导" });
+
+    expect(preview.textContent).toBe(
+      "先完成当前检查，再根据测试结果调整实现并重新运行完整测试",
+    );
+    expect(preview.getAttribute("title")).toBe(preview.textContent);
+  });
+
+  it("真实 Turn ID 尚未返回时不允许把 pending 回合当作引导目标", () => {
+    const { container } = renderConversation(
+      "exhausted",
+      undefined,
+      { draft: "继续", busy: true, steerable: false },
+    );
+    const view = within(container);
+
+    expect(view.getByRole("button", { name: "停止" })).not.toBeNull();
+    expect(view.queryByRole("button", { name: "引导" })).toBeNull();
   });
 });

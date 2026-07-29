@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState, type RefObject } from "react";
 import { AppServerClient } from "../../app-server/client";
 import {
+  automationAgentMessageText,
   groupTimelineEntries,
   groupTurnItems,
   imageSourcesForItem,
@@ -8,12 +9,14 @@ import {
   parseAutomationHeartbeat,
   shouldCollapseUserMessage,
   splitCompletedTurnResponses,
+  splitTurnResponseSegments,
   stripGitDirectives,
   summarizeToolActivity,
   toolActivityRowLabel,
   type ImageSource,
 } from "../../ui/conversation";
 import { CopyButton, visibleAssistantText } from "../../ui/copy";
+import { AppIcon } from "../../ui/app-display";
 import { Chevron } from "../../ui/icons";
 import {
   RemoteFileLink,
@@ -181,15 +184,26 @@ function TimelineItem({
   client: AppServerClient | null;
 }) {
   const type = String(item.type ?? "");
+  if (type === "contextCompaction") {
+    return (
+      <div
+        className="context-compaction"
+        role="separator"
+        aria-label="上下文已压缩"
+      >
+        <span aria-hidden="true">⟳</span>
+        <strong>上下文已压缩</strong>
+      </div>
+    );
+  }
   const rawText = itemText(item);
-  const heartbeat = type === "agentMessage"
-    ? parseAutomationHeartbeat(rawText)
-    : null;
-  const text = heartbeat?.message ?? rawText;
+  const text = type === "agentMessage"
+    ? automationAgentMessageText(rawText)
+    : rawText;
   if (!text && !type) return null;
   if (type === "userMessage") return <UserBubble item={item} client={client} />;
   const displayText = type === "agentMessage"
-    ? stripGitDirectives(text)
+    ? visibleAgentMessageText(item)
     : text;
   const images = imageSourcesForItem(item);
   if (images.length) return <ImageGallery images={images} client={client} />;
@@ -221,6 +235,79 @@ function TimelineItem({
   ) : null;
 }
 
+function StreamCharacterCount({ count }: { count: number }) {
+  return (
+    <div
+      className="stream-character-count"
+      aria-label={`已接收 ${count} 字符`}
+    >
+      <AppIcon name="download" />
+      <span>{count} 字符</span>
+    </div>
+  );
+}
+
+function visibleAgentMessageText(item: AnyRecord) {
+  return stripGitDirectives(
+    automationAgentMessageText(itemText(item)),
+  );
+}
+
+function valueCharacterCount(value: unknown) {
+  if (value == null) return 0;
+  const text =
+    typeof value === "string"
+      ? value
+      : JSON.stringify(value);
+  return Array.from(text ?? "").length;
+}
+
+export function receivedItemCharacterCount(item: AnyRecord) {
+  if (
+    item.type === "userMessage" ||
+    item.type === "contextCompaction" ||
+    item.type === "imageView" ||
+    item.type === "imageGeneration"
+  ) {
+    return 0;
+  }
+  if (item.type === "agentMessage") {
+    return Array.from(visibleAgentMessageText(item)).length;
+  }
+  if (/reasoning/i.test(String(item.type ?? ""))) {
+    return valueCharacterCount(
+      item.text ?? item.summary ?? item.content,
+    );
+  }
+  if (item.type === "commandExecution") {
+    return (
+      valueCharacterCount(item.command) +
+      valueCharacterCount(item.aggregatedOutput ?? item.output)
+    );
+  }
+  if (item.type === "fileChange") {
+    return valueCharacterCount(
+      item.changes ?? item.result ?? item.error ?? item.contentItems,
+    );
+  }
+  if (
+    /tool/i.test(String(item.type ?? "")) ||
+    item.tool != null
+  ) {
+    return (
+      valueCharacterCount(item.tool) +
+      valueCharacterCount(item.arguments) +
+      valueCharacterCount(
+        item.result ??
+        item.error ??
+        item.contentItems ??
+        item.output,
+      )
+    );
+  }
+  return valueCharacterCount(itemText(item));
+}
+
 export function TurnCard({
   turn,
   liveDiff,
@@ -231,14 +318,20 @@ export function TurnCard({
   client: AppServerClient | null;
 }) {
   const grouped = groupTurnItems(turn);
-  const completed = splitCompletedTurnResponses(grouped.responses);
-  const [showPrevious, setShowPrevious] = useState(false);
-  const wasRunning = useRef(grouped.running);
   const responsesRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (wasRunning.current && !grouped.running) setShowPrevious(false);
-    wasRunning.current = grouped.running;
-  }, [grouped.running]);
+  let lastHumanIndex = -1;
+  for (let index = grouped.responses.length - 1; index >= 0; index -= 1) {
+    if (grouped.responses[index]?.type === "userMessage") {
+      lastHumanIndex = index;
+      break;
+    }
+  }
+  const activeResponseItems = grouped.responses.slice(lastHumanIndex + 1);
+  const streamingCharacterCount = activeResponseItems.reduce(
+    (total: number, item: AnyRecord) =>
+      total + receivedItemCharacterCount(item),
+    0,
+  );
   const renderEntries = (items: AnyRecord[]) =>
     groupTimelineEntries(items).map((entry, index) =>
       entry.kind === "activity" ? (
@@ -254,6 +347,18 @@ export function TurnCard({
         />
       ),
     );
+  const completedSegments = splitTurnResponseSegments(grouped.responses);
+  let copySegmentIndex = -1;
+  for (let index = completedSegments.length - 1; index >= 0; index -= 1) {
+    if (
+      completedSegments[index]?.some(
+        (item) => item.type === "agentMessage",
+      )
+    ) {
+      copySegmentIndex = index;
+      break;
+    }
+  }
   return (
     <section className="turn-card">
       {grouped.user && (
@@ -271,46 +376,114 @@ export function TurnCard({
                 <pre>{liveDiff}</pre>
               </details>
             )}
+            <StreamCharacterCount count={streamingCharacterCount} />
           </>
         ) : (
-          <>
-            {completed.previousCount > 0 && (
-              <>
-                <button
-                  type="button"
-                  className="previous-messages-toggle"
-                  aria-expanded={showPrevious}
-                  onClick={() => setShowPrevious((current) => !current)}
-                >
-                  之前的 {completed.previousCount} 条消息
-                  <Chevron direction={showPrevious ? "down" : "right"} />
-                </button>
-                {showPrevious && (
-                  <div className="previous-messages">
-                    {renderEntries(completed.previous)}
-                    {liveDiff && (
-                      <details className="tool-card diff-card">
-                        <summary>代码变更</summary>
-                        <pre>{liveDiff}</pre>
-                      </details>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-            {completed.final && (
-              <>
-                <TimelineItem item={completed.final} client={client} />
-                <CopyButton
-                  text={() => visibleAssistantText(responsesRef.current)}
-                  label="复制本回合 AI 消息"
-                  className="turn-message-copy"
-                />
-              </>
-            )}
-          </>
+          completedSegments.map((items, index) => (
+            <CompletedResponseSegment
+              key={items[0]?.id ?? index}
+              items={items}
+              client={client}
+              liveDiff={index === copySegmentIndex ? liveDiff : undefined}
+              copyTarget={responsesRef}
+              showCopy={index === copySegmentIndex}
+            />
+          ))
         )}
       </div>
     </section>
+  );
+}
+
+function CompletedResponseSegment({
+  items,
+  client,
+  liveDiff,
+  copyTarget,
+  showCopy,
+}: {
+  items: AnyRecord[];
+  client: AppServerClient | null;
+  liveDiff?: string;
+  copyTarget: RefObject<HTMLDivElement | null>;
+  showCopy: boolean;
+}) {
+  const completed = splitCompletedTurnResponses(items);
+  const [showPrevious, setShowPrevious] = useState(false);
+  const renderEntries = (entries: AnyRecord[]) =>
+    groupTimelineEntries(entries).map((entry, index) =>
+      entry.kind === "activity" ? (
+        <ToolActivity
+          key={`activity-${entry.items[0]?.id ?? index}`}
+          items={entry.items}
+        />
+      ) : (
+        <TimelineItem
+          key={entry.item.id ?? index}
+          item={entry.item}
+          client={client}
+        />
+      ),
+    );
+  const renderUnfoldedEntries = (entries: AnyRecord[]) =>
+    renderEntries(
+      entries.filter(
+        (item) =>
+          item.type === "userMessage" ||
+          (
+            completed.previousCount === 0 &&
+            item.type === "contextCompaction"
+          ),
+      ),
+    );
+  return (
+    <>
+      {completed.previousCount > 0 && (
+        <>
+          <button
+            type="button"
+            className="previous-messages-toggle"
+            aria-expanded={showPrevious}
+            onClick={() => setShowPrevious((current) => !current)}
+          >
+            之前的 {completed.previousCount} 条消息
+            <Chevron direction={showPrevious ? "down" : "right"} />
+          </button>
+          {showPrevious && (
+            <div className="previous-messages">
+              {renderEntries(completed.beforeFinal)}
+            </div>
+          )}
+        </>
+      )}
+      {!showPrevious && renderUnfoldedEntries(completed.beforeFinal)}
+      {showPrevious && liveDiff && (
+        <details className="tool-card diff-card">
+          <summary>代码变更</summary>
+          <pre>{liveDiff}</pre>
+        </details>
+      )}
+      {completed.final && (
+        <>
+          <TimelineItem item={completed.final} client={client} />
+          {showCopy && (
+            <CopyButton
+              text={() => visibleAssistantText(copyTarget.current)}
+              label="复制本回合 AI 消息"
+              className="turn-message-copy"
+            />
+          )}
+        </>
+      )}
+      {showPrevious ? (
+        completed.afterFinal.length > 0 && (
+          <div className="previous-messages after-final">
+            {renderEntries(completed.afterFinal)}
+          </div>
+        )
+      ) : (
+        renderUnfoldedEntries(completed.afterFinal)
+      )}
+    </>
   );
 }

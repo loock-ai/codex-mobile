@@ -46,6 +46,9 @@ export function ConversationPage({
   draftImages,
   imageReading,
   busy,
+  steering,
+  steerable,
+  pendingSteerText,
   tokenUsage,
   rateLimits,
   pendingAction,
@@ -85,6 +88,9 @@ export function ConversationPage({
   draftImages: DraftImage[];
   imageReading: boolean;
   busy: boolean;
+  steering: boolean;
+  steerable: boolean;
+  pendingSteerText: string;
   tokenUsage: Record<string, any> | null;
   rateLimits: Record<string, any> | null;
   pendingAction: string;
@@ -113,6 +119,8 @@ export function ConversationPage({
   const [actionsOpen, setActionsOpen] = useState(false);
   const turns = groupConversationTurns(active.turns ?? []);
   const isNewChat = !active.id;
+  const hasDraft = Boolean(draft.trim() || draftImages.length);
+  const canSteer = busy && steerable && hasDraft;
   const {
     scrollRef,
     contentRef,
@@ -197,6 +205,10 @@ export function ConversationPage({
           void onPin().then((completed) => {
             if (completed) setActionsOpen(false);
           });
+        }}
+        onRefresh={() => {
+          setActionsOpen(false);
+          onRetry();
         }}
         onCopy={() => {
           void navigator.clipboard?.writeText(String(active.id));
@@ -333,6 +345,16 @@ export function ConversationPage({
         aria-busy={imageReading}
         onSubmit={onSubmit}
       >
+        {pendingSteerText && (
+          <div
+            className="pending-steer-message"
+            role="status"
+            aria-label="已发送引导"
+            title={pendingSteerText}
+          >
+            {pendingSteerText}
+          </div>
+        )}
         {draftImages.length > 0 && (
           <div className="draft-images" aria-label="待发送图片">
             {draftImages.map((image) => (
@@ -406,23 +428,36 @@ export function ConversationPage({
           <textarea
             aria-label="向 Codex 提问"
             value={draft}
-            disabled={!interactive}
+            disabled={!interactive || steering}
             onChange={(event) => onDraftChange(event.target.value)}
             placeholder="向 Codex 提问"
             rows={1}
           />
           <button
-            type={busy ? "button" : "submit"}
-            onClick={busy ? onInterrupt : undefined}
+            type={busy && !canSteer ? "button" : "submit"}
+            onClick={busy && !canSteer ? onInterrupt : undefined}
             className="send-button"
-            aria-label={busy ? "停止" : "发送"}
+            aria-label={
+              steering
+                ? "正在引导"
+                : canSteer
+                  ? "引导"
+                  : busy
+                    ? "停止"
+                    : "发送"
+            }
             disabled={
               !interactive ||
-              (!busy &&
-                (imageReading || (!draft.trim() && !draftImages.length)))
+              steering ||
+              (canSteer && imageReading) ||
+              (!busy && (imageReading || !hasDraft))
             }
           >
-            <AppIcon name={busy ? "stop" : "send"} />
+            {steering ? (
+              <i className="action-spinner composer-steer-spinner" />
+            ) : (
+              <AppIcon name={busy && !canSteer ? "stop" : "send"} />
+            )}
           </button>
         </div>
       </form>

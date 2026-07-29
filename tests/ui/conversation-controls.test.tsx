@@ -61,6 +61,7 @@ describe("对话详情控制", () => {
 
   it("操作面板根据持久化字段切换置顶文案", () => {
     const onPin = vi.fn();
+    const onRefresh = vi.fn();
     const { container, rerender } = render(
       <ConversationActionMenu
         open
@@ -68,6 +69,7 @@ describe("对话详情控制", () => {
         pendingAction=""
         onClose={() => undefined}
         onPin={onPin}
+        onRefresh={onRefresh}
         onCopy={() => undefined}
         onRename={() => undefined}
         onArchive={() => undefined}
@@ -77,6 +79,8 @@ describe("对话详情控制", () => {
 
     fireEvent.click(view.getByRole("button", { name: "置顶" }));
     expect(onPin).toHaveBeenCalledTimes(1);
+    fireEvent.click(view.getByRole("button", { name: "刷新会话" }));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
 
     rerender(
       <ConversationActionMenu
@@ -85,6 +89,7 @@ describe("对话详情控制", () => {
         pendingAction=""
         onClose={() => undefined}
         onPin={onPin}
+        onRefresh={onRefresh}
         onCopy={() => undefined}
         onRename={() => undefined}
         onArchive={() => undefined}

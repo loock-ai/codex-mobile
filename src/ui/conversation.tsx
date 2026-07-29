@@ -44,6 +44,21 @@ export function parseAutomationHeartbeat(
   };
 }
 
+export function automationAgentMessageText(text: string) {
+  const completeHeartbeat = parseAutomationHeartbeat(text);
+  if (completeHeartbeat) return completeHeartbeat.message ?? "";
+
+  const trailingEnvelope = text.match(
+    /(?:^|\r?\n)\s*(<heartbeat>\s*[\s\S]*?<\/heartbeat>)\s*$/i,
+  );
+  if (!trailingEnvelope) return text;
+  const heartbeat = parseAutomationHeartbeat(trailingEnvelope[1]);
+  if (!heartbeat) return text;
+
+  const visibleText = text.slice(0, trailingEnvelope.index).trimEnd();
+  return visibleText || heartbeat.message || "";
+}
+
 export function stripGitDirectives(text: string) {
   const visibleLines: string[] = [];
   let fenceMarker = "";
@@ -420,11 +435,42 @@ export function splitCompletedTurnResponses(
     }
   }
   const final = finalIndex >= 0 ? responses[finalIndex] : null;
+  const beforeFinal =
+    finalIndex >= 0 ? responses.slice(0, finalIndex) : [...responses];
+  const afterFinal =
+    finalIndex >= 0 ? responses.slice(finalIndex + 1) : [];
   const previous =
-    finalIndex >= 0
-      ? responses.filter((_, index) => index !== finalIndex)
-      : [...responses];
-  return { final, previous, previousCount: previous.length };
+    finalIndex >= 0 ? [...beforeFinal, ...afterFinal] : beforeFinal;
+  return {
+    final,
+    previous,
+    previousCount: previous.filter(
+      (item) =>
+        item.type !== "contextCompaction" &&
+        item.type !== "userMessage",
+    ).length,
+    beforeFinal,
+    afterFinal,
+  };
+}
+
+export function splitTurnResponseSegments(
+  responses: ConversationRecord[],
+) {
+  const segments: ConversationRecord[][] = [];
+  for (const item of responses) {
+    if (item.type === "userMessage" && segments.length > 0) {
+      segments.push([item]);
+      continue;
+    }
+    const current = segments.at(-1);
+    if (current) {
+      current.push(item);
+    } else {
+      segments.push([item]);
+    }
+  }
+  return segments;
 }
 
 function mergeTurnItems(

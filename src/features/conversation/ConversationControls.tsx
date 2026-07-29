@@ -184,6 +184,7 @@ export function ConversationActionMenu({
   pendingAction,
   onClose,
   onPin,
+  onRefresh,
   onCopy,
   onRename,
   onArchive,
@@ -193,6 +194,7 @@ export function ConversationActionMenu({
   pendingAction: string;
   onClose: () => void;
   onPin: () => void;
+  onRefresh: () => void;
   onCopy: () => void;
   onRename: () => void;
   onArchive: () => void;
@@ -205,6 +207,12 @@ export function ConversationActionMenu({
       label: pinned ? "取消置顶" : "置顶",
       icon: "pin" as const,
       onClick: onPin,
+    },
+    {
+      id: "refresh",
+      label: "刷新会话",
+      icon: "refresh" as const,
+      onClick: onRefresh,
     },
     {
       id: "copy",

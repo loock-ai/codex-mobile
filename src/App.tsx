@@ -27,6 +27,14 @@ import {
   type OlderTurnsLoadState,
 } from "./app-server/thread-session";
 import {
+  activeTurnId,
+  buildTurnSteerParams,
+  clearPendingSteerForRequest,
+  clearPendingSteerForThread,
+  mergeSteerDraft,
+  type PendingSteerMessage,
+} from "./app-server/turn-steering";
+import {
   activeThreadAfterArchive,
   setThreadPinned,
 } from "./app-server/thread-metadata";
@@ -169,6 +177,9 @@ function BackendWorkspace({
   const [draftImages, setDraftImages] = useState<DraftImage[]>([]);
   const [imageReading, setImageReading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [steering, setSteering] = useState(false);
+  const [pendingSteerMessage, setPendingSteerMessage] =
+    useState<PendingSteerMessage | null>(null);
   const [error, setError] = useState("");
   const [requests, setRequests] = useState<RpcMessage[]>([]);
   const [userAnswers, setUserAnswers] = useState<Record<string, string>>({});
@@ -414,6 +425,8 @@ function BackendWorkspace({
         if (status === "offline") {
           clientRef.current = null;
           setBusy(false);
+          setSteering(false);
+          setPendingSteerMessage(null);
           setRequests([]);
           void fetchBackendHostInfo(backend).catch((reason) => {
             const message =
@@ -539,6 +552,9 @@ function BackendWorkspace({
           if (message.method === "turn/completed") {
             if (params.threadId) {
               const threadId = String(params.threadId);
+              setPendingSteerMessage((current) =>
+                clearPendingSteerForThread(current, threadId),
+              );
               if (
                 shouldMarkThreadUnread({
                   threadId,
@@ -565,6 +581,7 @@ function BackendWorkspace({
               const completed = applyCompletedTurn(current, params);
               if (completed === current) return current;
               setBusy(false);
+              setSteering(false);
               return completed;
             });
             void loadThreads(client);
@@ -783,6 +800,7 @@ function BackendWorkspace({
   function resetDraftContext() {
     draftContextGenerationRef.current += 1;
     invalidateImageReads();
+    setPendingSteerMessage(null);
   }
 
   function resetOlderTurns(cursor: string | null = null) {
@@ -904,6 +922,7 @@ function BackendWorkspace({
     } catch (reason) {
       if (sequence === openSequenceRef.current) {
         setBusy(false);
+        setSteering(false);
         setConversationLoadState("error");
         setConversationLoadError(
           reason instanceof Error ? reason.message : String(reason),
@@ -939,6 +958,7 @@ function BackendWorkspace({
     setOpeningThreadId(thread.id);
     setError("");
     setBusy(false);
+    setSteering(false);
     setConversationLoadError("");
     setConversationLoadState("loading");
     resetOlderTurns();
@@ -969,12 +989,60 @@ function BackendWorkspace({
     if (
       imageReading ||
       (!text && !pendingImages.length) ||
-      !clientRef.current ||
-      busy
+      !clientRef.current
     ) {
       return;
     }
     const draftContext = draftContextGenerationRef.current;
+    if (busy) {
+      const threadId = String(active?.id ?? "");
+      const turnId = activeTurnId(active);
+      if (!threadId || !turnId) {
+        setError("当前任务正在启动，请稍后再引导");
+        return;
+      }
+      const clientUserMessageId =
+        `steer-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const pendingSteerText =
+        text || `${pendingImages.length} 张图片`;
+      invalidateImageReads();
+      setDraft("");
+      setDraftImages([]);
+      setSteering(true);
+      setPendingSteerMessage({
+        id: clientUserMessageId,
+        threadId,
+        text: pendingSteerText,
+      });
+      setError("");
+      try {
+        await clientRef.current.request(
+          "turn/steer",
+          buildTurnSteerParams({
+            threadId,
+            turnId,
+            input: buildTurnInput(text, pendingImages),
+            clientUserMessageId,
+          }),
+        );
+      } catch (reason) {
+        setPendingSteerMessage((current) =>
+          clearPendingSteerForRequest(current, clientUserMessageId),
+        );
+        if (draftContext === draftContextGenerationRef.current) {
+          setDraft((current) => mergeSteerDraft(current, text));
+          setDraftImages((current) =>
+            mergeDraftImages(current, pendingImages)
+          );
+          setError(reason instanceof Error ? reason.message : String(reason));
+        }
+      } finally {
+        if (draftContext === draftContextGenerationRef.current) {
+          setSteering(false);
+        }
+      }
+      return;
+    }
     invalidateImageReads();
     setDraft("");
     setDraftImages([]);
@@ -1467,6 +1535,13 @@ function BackendWorkspace({
           draftImages={draftImages}
           imageReading={imageReading}
           busy={busy}
+          steering={steering}
+          steerable={Boolean(activeTurnId(active))}
+          pendingSteerText={
+            pendingSteerMessage?.threadId === String(active.id)
+              ? pendingSteerMessage.text
+              : ""
+          }
           tokenUsage={tokenUsageByThread[active.id] ?? null}
           rateLimits={rateLimits}
           pendingAction={pendingAction}

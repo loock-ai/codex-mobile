@@ -79,4 +79,102 @@ describe("悬浮状态布局", () => {
     expect(labelRule).toContain("font-size: 12px");
   });
 
+  it("复制按钮使用轻量线框图标，代码块入口保持紧凑", () => {
+    const iconRule =
+      styles.match(
+        /(?:^|\n)\.copy-action > button svg\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+    const codeButtonRule =
+      styles.match(
+        /(?:^|\n)\.code-block-copy > button\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+    const codeIconRule =
+      styles.match(
+        /(?:^|\n)\.code-block-copy > button svg\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+    const responseRule =
+      styles.match(
+        /(?:^|\n)\.turn-responses\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+    const messageCopyRule =
+      styles.match(
+        /(?:^|\n)\.turn-message-copy\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+    const messageCopyButtonRule =
+      styles.match(
+        /(?:^|\n)\.turn-message-copy > button\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+
+    expect(iconRule).toContain("fill: none");
+    expect(iconRule).toContain("stroke: currentColor");
+    expect(responseRule).toContain("position: relative");
+    expect(messageCopyRule).toContain("position: absolute");
+    expect(messageCopyRule).toContain("top: calc(100% + 2px)");
+    expect(messageCopyButtonRule).toContain("width: 24px");
+    expect(messageCopyButtonRule).toContain("height: 24px");
+    expect(codeButtonRule).toContain("width: 24px");
+    expect(codeButtonRule).toContain("height: 24px");
+    expect(codeButtonRule).toContain("background: transparent");
+    expect(codeIconRule).toContain("width: 14px");
+    expect(codeIconRule).toContain("height: 14px");
+  });
+
+  it("过程消息折叠时为横线下方的最终回复保留展开态同等间距", () => {
+    const collapsedSpacingRule =
+      styles.match(
+        /(?:^|\n)\.previous-messages-toggle\[aria-expanded="false"\] \+ \.assistant-message\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+
+    expect(collapsedSpacingRule).toContain("margin-top: 17px");
+  });
+
+  it("待进入对话的引导消息悬浮在输入区上方并保持单行省略", () => {
+    const rule =
+      styles.match(
+        /(?:^|\n)\.pending-steer-message\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+
+    expect(rule).toContain("position: absolute");
+    expect(rule).toContain("bottom: calc(100% + 3px)");
+    expect(rule).toContain("overflow: hidden");
+    expect(rule).toContain("text-overflow: ellipsis");
+    expect(rule).toContain("white-space: nowrap");
+  });
+
+  it("流式字符提示在工具长时间运行时仍保留轻量接收动效", () => {
+    const iconRule =
+      styles.match(
+        /(?:^|\n)\.stream-character-count svg\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+
+    expect(iconRule).toContain("animation: stream-receiving");
+    expect(styles).toContain("@keyframes stream-receiving");
+    expect(styles).toContain(
+      "@media (prefers-reduced-motion: reduce) { .stream-character-count svg { animation: none; } }",
+    );
+  });
+
+  it("普通手机浏览器单独增加上下边缘间距且不改变 WebView", () => {
+    const rootRule =
+      styles.match(/(?:^|\n):root\s*\{([^}]*)\}/)?.[1] ?? "";
+    const nativeRule =
+      styles.match(/(?:^|\n)html\.native-webview\s*\{([^}]*)\}/)?.[1] ?? "";
+    const listActionsRule =
+      styles.match(/(?:^|\n)\.list-actions\s*\{([^}]*)\}/)?.[1] ?? "";
+    const composerRule =
+      styles.match(/(?:^|\n)\.composer-wrap\s*\{([^}]*)\}/)?.[1] ?? "";
+
+    expect(rootRule).toContain("--browser-edge-top: 8px");
+    expect(rootRule).toContain("--browser-edge-bottom: 8px");
+    expect(nativeRule).toContain("--browser-edge-top: 0px");
+    expect(nativeRule).toContain("--browser-edge-bottom: 0px");
+    expect(styles).not.toContain(
+      "@media (min-width: 721px) { :root { --browser-edge-top: 0px; --browser-edge-bottom: 0px; } }",
+    );
+    expect(listActionsRule).toContain("inset: auto 0 var(--browser-edge-bottom)");
+    expect(listActionsRule).toContain("padding: 8px 16px 0");
+    expect(composerRule).toContain("bottom: var(--browser-edge-bottom)");
+    expect(composerRule).toContain("padding: 8px 22px 0");
+  });
+
 });
