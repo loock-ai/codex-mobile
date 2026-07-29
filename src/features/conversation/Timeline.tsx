@@ -399,6 +399,12 @@ function CompletedResponseSegment({
 }) {
   const completed = splitCompletedTurnResponses(items);
   const [showPrevious, setShowPrevious] = useState(false);
+  const guidingMessages = completed.beforeFinal.filter(
+    (item) => item.type === "userMessage",
+  );
+  const processBeforeFinal = completed.beforeFinal.filter(
+    (item) => item.type !== "userMessage",
+  );
   const renderEntries = (entries: AnyRecord[]) =>
     groupTimelineEntries(entries).map((entry, index) =>
       entry.kind === "activity" ? (
@@ -427,6 +433,7 @@ function CompletedResponseSegment({
     );
   return (
     <>
+      {renderEntries(guidingMessages)}
       {completed.previousCount > 0 && (
         <>
           <button
@@ -440,12 +447,12 @@ function CompletedResponseSegment({
           </button>
           {showPrevious && (
             <div className="previous-messages">
-              {renderEntries(completed.beforeFinal)}
+              {renderEntries(processBeforeFinal)}
             </div>
           )}
         </>
       )}
-      {!showPrevious && renderUnfoldedEntries(completed.beforeFinal)}
+      {!showPrevious && renderUnfoldedEntries(processBeforeFinal)}
       {completed.final && (
         <>
           <TimelineItem item={completed.final} client={client} />

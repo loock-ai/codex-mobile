@@ -152,6 +152,44 @@ describe("移动端对话格式", () => {
     expect(view.queryByText("分析过程")).not.toBeNull();
   });
 
+  it("引导用户消息显示在对应过程折叠按钮之前", () => {
+    const { container } = render(
+      <TurnCard
+        turn={{
+          id: "turn-with-steering",
+          status: "completed",
+          items: [
+            { id: "u1", type: "userMessage", text: "先处理图标" },
+            {
+              id: "a1",
+              type: "agentMessage",
+              phase: "final_answer",
+              text: "先完成一版",
+            },
+            { id: "u2", type: "userMessage", text: "调整裁剪方式" },
+            { id: "r2", type: "reasoning", text: "重新检查边缘" },
+            {
+              id: "a2",
+              type: "agentMessage",
+              phase: "final_answer",
+              text: "裁剪完成",
+            },
+          ],
+        }}
+        client={null}
+      />,
+    );
+    const view = within(container);
+    const steeringBubble = view
+      .getByText("调整裁剪方式")
+      .closest(".user-bubble");
+    const toggle = view.getByRole("button", {
+      name: "之前的 1 条消息",
+    });
+
+    expect(steeringBubble?.nextElementSibling).toBe(toggle);
+  });
+
   it("逻辑回合仍在执行时完整展示跨 turn 的实时过程", () => {
     const runningTurns = [
       {
