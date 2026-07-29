@@ -107,7 +107,13 @@ ffmpeg \
   -filter_complex \
   "[0:v]scale=1024:1024:flags=lanczos[base]; \
    [1:v]scale=${mobile_size}:${mobile_size}:flags=lanczos[mobile]; \
-   [base][mobile]overlay=x=${mobile_x}:y=${mobile_y}:format=auto,format=rgba[icon]" \
+   [base][mobile]overlay=x=${mobile_x}:y=${mobile_y}:format=auto[composed]; \
+   [composed]crop=824:824:100:100[cropped]; \
+   color=c=white:s=824x824[background]; \
+   [background][cropped]overlay=format=auto,scale=1024:1024:flags=lanczos, \
+   fillborders=left=100:right=100:top=100:bottom=100:mode=smear[extended]; \
+   color=c=white@0.0:s=1024x104,format=rgba,geq=r=255:g=255:b=255:a='255*Y/103'[bottom_fade]; \
+   [extended][bottom_fade]overlay=x=0:y=920:format=auto,format=rgb24[icon]" \
   -map "[icon]" \
   -frames:v 1 \
   "$output_icon"

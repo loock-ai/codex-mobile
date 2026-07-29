@@ -95,6 +95,20 @@ describe("移动 App 内置前端流水线", () => {
     expect(readProjectFile("vite.config.ts")).toContain('base: "./"');
   });
 
+  it("移动图标合成后裁掉圆角矩形外侧透明留白", () => {
+    const composer = readProjectFile("scripts/compose-mobile-app-icon.sh");
+
+    expect(composer).toContain("crop=824:824:100:100");
+    expect(composer).toContain("color=c=white:s=824x824");
+    expect(composer).toContain(
+      "fillborders=left=100:right=100:top=100:bottom=100:mode=smear",
+    );
+    expect(composer).toContain("geq=r=255:g=255:b=255:a='255*Y/103'");
+    expect(composer).toContain("overlay=x=0:y=920");
+    expect(composer).toContain("format=rgb24");
+    expect(composer).toContain("scale=1024:1024:flags=lanczos");
+  });
+
   it("Android 只构建一个不绑定后端的 Codex Mobile App", () => {
     const { source, workflow } = readWorkflow(
       ".github/workflows/build-android.yml",
