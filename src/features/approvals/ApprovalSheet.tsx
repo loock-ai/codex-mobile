@@ -1,4 +1,5 @@
 import type { RpcMessage } from "../../app-server/client";
+import { ActionSheet } from "../../ui/ActionSheet";
 
 type AnyRecord = Record<string, any>;
 
@@ -16,13 +17,43 @@ export function ApprovalSheet({
   onDecision: (decision: "accept" | "decline") => void;
 }) {
   if (!approval) return null;
+  const requestsInput = approval.method === "item/tool/requestUserInput";
+  const title = requestsInput
+    ? "Codex 需要你的回答"
+    : approval.method?.includes("fileChange")
+      ? "允许修改文件？"
+      : approval.method?.includes("permissions")
+        ? "授予附加权限？"
+        : "允许运行此操作？";
   return (
-    <div className="approval-backdrop">
-      <section className="approval-sheet">
-        <small>需要你的确认</small>
-        {approval.method === "item/tool/requestUserInput" ? (
+    <ActionSheet
+      title={
+        <div>
+          <small>需要你的确认</small>
+          <h2>{title}</h2>
+        </div>
+      }
+      ariaLabel={title}
+      className="approval-sheet"
+      backdropClassName="approval-backdrop"
+      closeOnBackdrop={false}
+      footer={
+        requestsInput ? (
+          <button className="approve" onClick={onSubmitAnswers}>
+            提交回答
+          </button>
+        ) : (
           <>
-            <h3>Codex 需要你的回答</h3>
+            <button onClick={() => onDecision("decline")}>拒绝</button>
+            <button className="approve" onClick={() => onDecision("accept")}>
+              允许
+            </button>
+          </>
+        )
+      }
+    >
+        {requestsInput ? (
+          <>
             {(((approval.params as AnyRecord)?.questions ?? []) as AnyRecord[]).map((question) => (
               <label className="question-field" key={question.id}>
                 <strong>{question.header}</strong>
@@ -37,19 +68,10 @@ export function ApprovalSheet({
                 )}
               </label>
             ))}
-            <div><button className="approve" onClick={onSubmitAnswers}>提交回答</button></div>
           </>
         ) : (
-          <>
-            <h3>{approval.method?.includes("fileChange") ? "允许修改文件？" : approval.method?.includes("permissions") ? "授予附加权限？" : "允许运行此操作？"}</h3>
-            <pre>{JSON.stringify(approval.params, null, 2)}</pre>
-            <div>
-              <button onClick={() => onDecision("decline")}>拒绝</button>
-              <button className="approve" onClick={() => onDecision("accept")}>允许</button>
-            </div>
-          </>
+          <pre>{JSON.stringify(approval.params, null, 2)}</pre>
         )}
-      </section>
-    </div>
+    </ActionSheet>
   );
 }

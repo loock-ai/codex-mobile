@@ -1119,6 +1119,7 @@ function BackendWorkspace({
               {
                 id: pendingTurnId,
                 status: "inProgress",
+                startedAt: Math.floor(Date.now() / 1000),
                 items: [localItem],
               },
             ],

@@ -2,6 +2,7 @@ import { createRef, type FormEvent } from "react";
 import { fireEvent, render, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ConversationPage } from "../../src/features/conversation/ConversationPage";
+import type { DraftImage } from "../../src/ui/attachments";
 
 function renderConversation(
   olderTurnsState: "idle" | "loading" | "error" | "exhausted",
@@ -12,6 +13,7 @@ function renderConversation(
     steering?: boolean;
     steerable?: boolean;
     pendingSteerText?: string;
+    draftImages?: DraftImage[];
     onSubmit?: (event: FormEvent) => void;
   } = {},
   onRetry = vi.fn(),
@@ -36,7 +38,7 @@ function renderConversation(
       client={null}
       error=""
       draft={composer.draft ?? ""}
-      draftImages={[]}
+      draftImages={composer.draftImages ?? []}
       imageReading={false}
       busy={composer.busy ?? false}
       steering={composer.steering ?? false}
@@ -202,5 +204,33 @@ describe("会话详情历史分页", () => {
 
     expect(view.getByRole("button", { name: "停止" })).not.toBeNull();
     expect(view.queryByRole("button", { name: "引导" })).toBeNull();
+  });
+
+  it("待发送图片可以打开统一大图预览", () => {
+    const { container } = renderConversation(
+      "exhausted",
+      undefined,
+      {
+        draftImages: [
+          {
+            id: "draft-image",
+            name: "draft.png",
+            type: "image/png",
+            size: 68,
+            url: "data:image/png;base64,iVBORw0KGgo=",
+          },
+        ],
+      },
+    );
+    const view = within(container);
+
+    fireEvent.click(view.getByRole("button", { name: "预览 draft.png" }));
+
+    const preview = within(document.body).getByRole("dialog", {
+      name: "图片预览",
+    });
+    expect(
+      within(preview).getByRole("img", { name: "待发送 draft.png" }),
+    ).not.toBeNull();
   });
 });

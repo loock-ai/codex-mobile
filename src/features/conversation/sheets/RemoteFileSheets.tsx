@@ -10,16 +10,9 @@ import {
   parseRemoteFileHref,
   type ImageSource,
 } from "../../../ui/conversation";
-
-function downloadIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 3v12" />
-      <path d="m7 10 5 5 5-5" />
-      <path d="M5 21h14" />
-    </svg>
-  );
-}
+import { ActionSheet } from "../../../ui/ActionSheet";
+import { ActionSheetDownload } from "../../../ui/ActionSheetDownload";
+import { ImagePreviewSheet } from "./ImagePreviewSheet";
 
 function imageMime(source: string) {
   const extension = source.split(/[?#]/)[0]?.split(".").at(-1)?.toLowerCase();
@@ -34,6 +27,10 @@ function imageMime(source: string) {
       webp: "image/webp",
     }[extension ?? ""] ?? "image/png"
   );
+}
+
+function isPreviewableImagePath(source: string) {
+  return /\.(?:avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/i.test(source);
 }
 
 function formatImageSize(bytes: number | null) {
@@ -71,6 +68,8 @@ export function RemoteImage({
   const [size, setSize] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
+  const inline = /^data:/i.test(image.source);
+  const displayName = inline ? alt?.trim() || "图片" : image.name;
 
   useEffect(() => {
     let cancelled = false;
@@ -109,7 +108,7 @@ export function RemoteImage({
       <button
         type="button"
         className="message-image-button"
-        aria-label={`查看图片 ${image.name}`}
+        aria-label={`查看图片 ${displayName}`}
         onClick={(event) => {
           event.stopPropagation();
           setOpen(true);
@@ -118,36 +117,19 @@ export function RemoteImage({
         <img src={src} alt={alt || image.name} />
       </button>
       {open && (
-        <div
-          className="remote-file-backdrop"
-          onClick={(event) => {
-            event.stopPropagation();
-            setOpen(false);
-          }}
-        >
-          <section
-            className="remote-file-sheet"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <header>
-              <h3>远程文件</h3>
-              <a href={src} download={image.name} aria-label="下载图片">
-                {downloadIcon()}
-              </a>
-            </header>
-            <img className="remote-file-preview" src={src} alt={alt || image.name} />
-            <p><strong>{image.name}</strong>{size != null ? ` (${formatImageSize(size)})` : ""}</p>
-            <p className="remote-file-path">{image.source}</p>
-            <button
-              type="button"
-              className="sheet-close"
-              aria-label="关闭远程文件"
-              onClick={() => setOpen(false)}
-            >
-              完成
-            </button>
-          </section>
-        </div>
+        <ImagePreviewSheet
+          src={src}
+          name={displayName}
+          alt={alt || displayName}
+          details={
+            inline
+              ? ""
+              : `${image.source}${
+                  size != null ? ` · ${formatImageSize(size)}` : ""
+                }`
+          }
+          onClose={() => setOpen(false)}
+        />
       )}
     </>
   );
@@ -208,6 +190,17 @@ function RemoteTextFileSheet({
       .request<{ dataBase64: string }>("fs/readFile", { path })
       .then((result) => {
         if (cancelled) return;
+        if (isPreviewableImagePath(path)) {
+          setState({
+            status: "ready",
+            text: "",
+            dataBase64: result.dataBase64,
+            bytes: Math.floor((result.dataBase64.length * 3) / 4),
+            binary: true,
+            error: "",
+          });
+          return;
+        }
         const decoded = decodeBase64File(result.dataBase64);
         setState({
           status: "ready",
@@ -238,34 +231,44 @@ function RemoteTextFileSheet({
 
   const lines = state.text.split("\n");
   if (lines.at(-1) === "") lines.pop();
+  if (
+    state.status === "ready" &&
+    state.dataBase64 &&
+    isPreviewableImagePath(path)
+  ) {
+    return (
+      <ImagePreviewSheet
+        src={`data:${imageMime(path)};base64,${state.dataBase64}`}
+        name={name}
+        details={`${href}${
+          state.bytes != null ? ` · ${formatImageSize(state.bytes)}` : ""
+        }`}
+        onClose={onClose}
+      />
+    );
+  }
 
   return (
-    <div className="remote-file-backdrop" onClick={onClose}>
-      <section
-        className="remote-text-sheet"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header>
-          <h3>远程文件</h3>
-          <div className="remote-text-actions">
-            {state.dataBase64 && (
-              <a
-                href={`data:text/plain;charset=utf-8;base64,${state.dataBase64}`}
-                download={name}
-                aria-label="下载文件"
-              >
-                {downloadIcon()}
-              </a>
-            )}
-            <button
-              type="button"
-              aria-label="关闭远程文件"
-              onClick={onClose}
-            >
-              ×
-            </button>
-          </div>
-        </header>
+    <ActionSheet
+      title="远程文件"
+      ariaLabel="远程文件"
+      onClose={onClose}
+      closeLabel="关闭远程文件"
+      className="remote-text-sheet"
+      backdropClassName="remote-file-backdrop"
+      headerActions={
+        <>
+          {state.dataBase64 && (
+            <ActionSheetDownload
+              href={`data:text/plain;charset=utf-8;base64,${state.dataBase64}`}
+              filename={name}
+              label="下载文件"
+            />
+          )}
+        </>
+      }
+      footer={<p className="remote-file-path">{href}</p>}
+    >
         <div className="remote-text-file-name">
           <strong>{name}</strong>
           {state.bytes != null ? ` (${formatImageSize(state.bytes)})` : ""}
@@ -306,11 +309,7 @@ function RemoteTextFileSheet({
               );
             })}
         </div>
-        <footer>
-          <p className="remote-file-path">{href}</p>
-        </footer>
-      </section>
-    </div>
+    </ActionSheet>
   );
 }
 

@@ -1,4 +1,4 @@
-import { useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { AppServerClient } from "../../app-server/client";
 import {
   automationAgentMessageText,
@@ -13,6 +13,7 @@ import {
   stripGitDirectives,
   summarizeToolActivity,
   toolActivityRowLabel,
+  turnDurationMs,
   type ImageSource,
 } from "../../ui/conversation";
 import { CopyButton, visibleAssistantText } from "../../ui/copy";
@@ -84,6 +85,17 @@ function UserBubble({
           <MarkdownMessage
             text={text}
             className="user-markdown"
+            renderImage={(source, alt) => (
+              <RemoteImage
+                image={{
+                  source,
+                  name: source.split("/").at(-1) || alt,
+                  local: !/^(data:|https?:)/i.test(source),
+                }}
+                client={client}
+                alt={alt}
+              />
+            )}
             renderLink={(href, children) => (
               <RemoteFileLink href={href} client={client}>
                 {children}
@@ -234,14 +246,38 @@ function TimelineItem({
   ) : null;
 }
 
-function StreamCharacterCount({ count }: { count: number }) {
+function StreamCharacterCount({
+  count,
+  startedAt,
+}: {
+  count: number;
+  startedAt?: number | null;
+}) {
+  const [now, setNow] = useState(Date.now);
+  const hasStartedAt =
+    typeof startedAt === "number" && Number.isFinite(startedAt);
+
+  useEffect(() => {
+    if (!hasStartedAt) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [hasStartedAt, startedAt]);
+
+  const elapsedLabel = hasStartedAt
+    ? formatTurnDuration(Math.max(0, now - startedAt * 1000))
+    : null;
   return (
     <div
       className="stream-character-count"
-      aria-label={`已接收 ${count} 字符`}
+      aria-label={`已接收 ${count} 字符${
+        elapsedLabel ? `，已运行 ${elapsedLabel}` : ""
+      }`}
     >
       <i className="stream-character-spinner" aria-hidden="true" />
       <span>{count} 字符</span>
+      {elapsedLabel && (
+        <span className="stream-elapsed">· {elapsedLabel}</span>
+      )}
     </div>
   );
 }
@@ -250,6 +286,20 @@ function visibleAgentMessageText(item: AnyRecord) {
   return stripGitDirectives(
     automationAgentMessageText(itemText(item)),
   );
+}
+
+function formatTurnDuration(durationMs: number) {
+  const totalSeconds = Math.floor(durationMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}小时${minutes > 0 ? `${minutes}分` : ""}`;
+  }
+  if (minutes > 0) {
+    return `${minutes}分${seconds > 0 ? `${seconds}秒` : ""}`;
+  }
+  return `${seconds}秒`;
 }
 
 function valueCharacterCount(value: unknown) {
@@ -346,6 +396,22 @@ export function TurnCard({
       ),
     );
   const completedSegments = splitTurnResponseSegments(grouped.responses);
+  const durationMs = turnDurationMs(turn);
+  const durationLabel =
+    durationMs != null && durationMs > 60_000
+      ? formatTurnDuration(durationMs)
+      : null;
+  let durationSegmentIndex = -1;
+  if (durationLabel) {
+    for (let index = completedSegments.length - 1; index >= 0; index -= 1) {
+      if (
+        splitCompletedTurnResponses(completedSegments[index]).previousCount > 0
+      ) {
+        durationSegmentIndex = index;
+        break;
+      }
+    }
+  }
   let copySegmentIndex = -1;
   for (let index = completedSegments.length - 1; index >= 0; index -= 1) {
     if (
@@ -368,7 +434,10 @@ export function TurnCard({
         {grouped.running ? (
           <>
             {renderEntries(grouped.responses)}
-            <StreamCharacterCount count={streamingCharacterCount} />
+            <StreamCharacterCount
+              count={streamingCharacterCount}
+              startedAt={turn.startedAt}
+            />
           </>
         ) : (
           completedSegments.map((items, index) => (
@@ -378,6 +447,9 @@ export function TurnCard({
               client={client}
               copyTarget={responsesRef}
               showCopy={index === copySegmentIndex}
+              durationLabel={
+                index === durationSegmentIndex ? durationLabel : null
+              }
             />
           ))
         )}
@@ -391,11 +463,13 @@ function CompletedResponseSegment({
   client,
   copyTarget,
   showCopy,
+  durationLabel,
 }: {
   items: AnyRecord[];
   client: AppServerClient | null;
   copyTarget: RefObject<HTMLDivElement | null>;
   showCopy: boolean;
+  durationLabel: string | null;
 }) {
   const completed = splitCompletedTurnResponses(items);
   const [showPrevious, setShowPrevious] = useState(false);
@@ -440,9 +514,15 @@ function CompletedResponseSegment({
             type="button"
             className="previous-messages-toggle"
             aria-expanded={showPrevious}
+            aria-label={`之前的 ${completed.previousCount} 条消息${
+              durationLabel ? ` · ${durationLabel}` : ""
+            }`}
             onClick={() => setShowPrevious((current) => !current)}
           >
             之前的 {completed.previousCount} 条消息
+            {durationLabel && (
+              <span className="turn-duration">· {durationLabel}</span>
+            )}
             <Chevron direction={showPrevious ? "down" : "right"} />
           </button>
           {showPrevious && (

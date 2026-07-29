@@ -20,6 +20,7 @@ import type {
   BackendRegistry,
   BackendRuntimeSummary,
 } from "../../backends/types";
+import { ActionSheet } from "../../ui/ActionSheet";
 
 interface BackendDraft {
   id: string;
@@ -135,19 +136,14 @@ export function BackendManagerSheet({
   };
 
   return (
-    <div className="backend-manager-backdrop" role="presentation">
-      <section
-        className="backend-manager-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="backend-manager-title"
-      >
-        <header>
-          <h2 id="backend-manager-title">
-            {draft ? "设备连接" : "管理设备"}
-          </h2>
-          <button type="button" aria-label="关闭" onClick={onClose}>×</button>
-        </header>
+    <ActionSheet
+      title={draft ? "设备连接" : "管理设备"}
+      onClose={onClose}
+      closeLabel="关闭"
+      closeOnBackdrop={false}
+      className="backend-manager-sheet"
+      backdropClassName="backend-manager-backdrop"
+    >
         {draft ? (
           <form className="backend-form" onSubmit={submit}>
             <label>
@@ -318,7 +314,6 @@ export function BackendManagerSheet({
             )}
           </>
         )}
-      </section>
-    </div>
+    </ActionSheet>
   );
 }

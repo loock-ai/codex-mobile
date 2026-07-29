@@ -1,10 +1,11 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
   within,
 } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   receivedItemCharacterCount,
   TurnCard,
@@ -35,6 +36,10 @@ import {
   summarizeFileChange,
   toolActivityRowLabel,
 } from "../../src/ui/conversation";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("移动端对话格式", () => {
   it("按用户消息边界把连续 assistant-only turns 合并为逻辑回合", () => {
@@ -95,6 +100,31 @@ describe("移动端对话格式", () => {
     expect(groups[0].liveDiff).toBe("diff-1\ndiff-2");
   });
 
+  it("合并 assistant-only turns 时保留逻辑回合的完整耗时边界", () => {
+    const [group] = groupConversationTurns([
+      {
+        id: "turn-start",
+        status: "completed",
+        startedAt: 100,
+        completedAt: 150,
+        durationMs: 50_000,
+        items: [{ id: "u1", type: "userMessage", text: "开始" }],
+      },
+      {
+        id: "turn-tail",
+        status: "completed",
+        startedAt: 151,
+        completedAt: 225,
+        durationMs: 74_000,
+        items: [{ id: "a1", type: "agentMessage", text: "完成" }],
+      },
+    ]);
+
+    expect(group.startedAt).toBe(100);
+    expect(group.completedAt).toBe(225);
+    expect(group.durationMs).toBe(125_000);
+  });
+
   it("逻辑回合完成后只生成一个统一过程折叠区", () => {
     const [group] = groupConversationTurns([
       {
@@ -150,6 +180,105 @@ describe("移动端对话格式", () => {
     fireEvent.click(toggle);
     expect(view.queryByText("开始检查")).not.toBeNull();
     expect(view.queryByText("分析过程")).not.toBeNull();
+  });
+
+  it("折叠入口只在整轮耗时超过一分钟时展示耗时", () => {
+    const { container, rerender } = render(
+      <TurnCard
+        turn={{
+          id: "turn-duration",
+          status: "completed",
+          durationMs: 90_000,
+          items: [
+            { id: "u1", type: "userMessage", text: "检查耗时" },
+            { id: "r1", type: "reasoning", text: "处理中" },
+            {
+              id: "a1",
+              type: "agentMessage",
+              phase: "final_answer",
+              text: "处理完成",
+            },
+          ],
+        }}
+        client={null}
+      />,
+    );
+    const view = within(container);
+
+    expect(
+      view.getByRole("button", {
+        name: "之前的 1 条消息 · 1分30秒",
+      }),
+    ).not.toBeNull();
+
+    rerender(
+      <TurnCard
+        turn={{
+          id: "turn-duration",
+          status: "completed",
+          durationMs: 60_000,
+          items: [
+            { id: "u1", type: "userMessage", text: "检查耗时" },
+            { id: "r1", type: "reasoning", text: "处理中" },
+            {
+              id: "a1",
+              type: "agentMessage",
+              phase: "final_answer",
+              text: "处理完成",
+            },
+          ],
+        }}
+        client={null}
+      />,
+    );
+
+    expect(
+      view.getByRole("button", { name: "之前的 1 条消息" }),
+    ).not.toBeNull();
+    expect(view.queryByText("1分")).toBeNull();
+  });
+
+  it("多个引导折叠段只在最后一个入口展示整轮耗时", () => {
+    const { container } = render(
+      <TurnCard
+        turn={{
+          id: "turn-steered-duration",
+          status: "completed",
+          startedAt: 100,
+          completedAt: 225,
+          items: [
+            { id: "u1", type: "userMessage", text: "先检查" },
+            { id: "r1", type: "reasoning", text: "第一次处理" },
+            {
+              id: "a1",
+              type: "agentMessage",
+              phase: "final_answer",
+              text: "第一次完成",
+            },
+            { id: "u2", type: "userMessage", text: "继续调整" },
+            { id: "r2", type: "reasoning", text: "第二次处理" },
+            {
+              id: "a2",
+              type: "agentMessage",
+              phase: "final_answer",
+              text: "最终完成",
+            },
+          ],
+        }}
+        client={null}
+      />,
+    );
+    const view = within(container);
+
+    expect(
+      view.getByRole("button", { name: "之前的 1 条消息" }),
+    ).not.toBeNull();
+    expect(
+      view.getByRole("button", {
+        name: "之前的 1 条消息 · 2分5秒",
+      }),
+    ).not.toBeNull();
+    expect(view.getAllByText("· 2分5秒")).toHaveLength(1);
   });
 
   it("引导用户消息显示在对应过程折叠按钮之前", () => {
@@ -322,6 +451,37 @@ describe("移动端对话格式", () => {
     );
     view = within(container);
     expect(view.queryByLabelText(/已接收 \d+ 字符/)).toBeNull();
+  });
+
+  it("流式字符状态从本轮开始时间实时展示运行耗时", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-29T12:01:24Z"));
+    const { container } = render(
+      <TurnCard
+        turn={{
+          id: "turn-stream-duration",
+          status: "inProgress",
+          startedAt: Date.parse("2026-07-29T12:00:00Z") / 1000,
+          items: [
+            { id: "u1", type: "userMessage", text: "检查耗时" },
+            { id: "a1", type: "agentMessage", text: "处理中" },
+          ],
+        }}
+        client={null}
+      />,
+    );
+    const view = within(container);
+
+    expect(
+      view.getByLabelText("已接收 3 字符，已运行 1分24秒").textContent,
+    ).toBe("3 字符· 1分24秒");
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(
+      view.getByLabelText("已接收 3 字符，已运行 1分25秒"),
+    ).not.toBeNull();
   });
 
   it("运行中和完成后的对话时间线都不展示代码变更卡片", () => {

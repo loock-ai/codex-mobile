@@ -1,4 +1,5 @@
 import type { AppUpdateState } from "./useAppUpdate";
+import { ActionSheet } from "../../ui/ActionSheet";
 
 function statusLabel(state: AppUpdateState) {
   switch (state.phase) {
@@ -32,27 +33,35 @@ export function AppUpdateSheet({
   const label = statusLabel(state);
 
   return (
-    <div className="app-update-backdrop" role="presentation">
-      <section
-        className="app-update-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-label="发现新版本"
-      >
-        <header>
+    <ActionSheet
+      title={
           <div>
             <small>Codex Mobile</small>
             <h2>发现新版本</h2>
           </div>
-          <button
-            type="button"
-            aria-label="关闭更新"
-            disabled={working}
-            onClick={onClose}
-          >
-            ×
+      }
+      ariaLabel="发现新版本"
+      className="app-update-sheet"
+      backdropClassName="app-update-backdrop"
+      closeOnBackdrop={false}
+      closeLabel="关闭更新"
+      closeDisabled={working}
+      footer={
+        <>
+          <button type="button" disabled={working} onClick={onClose}>
+            稍后
           </button>
-        </header>
+          <button
+            className="primary"
+            type="button"
+            disabled={working}
+            onClick={state.phase === "error" ? onRetry : onInstall}
+          >
+            {state.phase === "error" ? "重试" : working ? label : "立即更新"}
+          </button>
+        </>
+      }
+    >
         <div className="app-update-content">
           <strong>v{state.release.version}</strong>
           <p className="app-update-current">
@@ -73,20 +82,6 @@ export function AppUpdateSheet({
             </p>
           )}
         </div>
-        <footer>
-          <button type="button" disabled={working} onClick={onClose}>
-            稍后
-          </button>
-          <button
-            className="primary"
-            type="button"
-            disabled={working}
-            onClick={state.phase === "error" ? onRetry : onInstall}
-          >
-            {state.phase === "error" ? "重试" : working ? label : "立即更新"}
-          </button>
-        </footer>
-      </section>
-    </div>
+    </ActionSheet>
   );
 }

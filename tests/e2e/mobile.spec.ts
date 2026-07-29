@@ -546,23 +546,26 @@ test("移动端选择器、线程恢复、Markdown、折叠与吸顶", async ({ 
   await expect(page.getByRole("img", { name: "ai.png" })).toHaveCount(0);
   await expect(page.getByText("我先检查界面和协议事件。")).toHaveCount(0);
   await page.getByRole("button", { name: "查看图片 user.png" }).click();
-  await expect(page.getByRole("heading", { name: "远程文件" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "图片预览" })).toBeVisible();
   await expect(
     page.locator(
-      ".remote-file-sheet .sheet-handle, .remote-file-sheet .sheet-handle-button",
+      ".image-preview-sheet .sheet-handle, .image-preview-sheet .sheet-handle-button",
     ),
   ).toHaveCount(0);
-  await expect(page.locator(".remote-file-sheet > header")).toHaveCSS(
+  await expect(page.locator(".image-preview-sheet > header")).toHaveCSS(
     "position",
     "sticky",
   );
-  await expect(page.locator(".remote-file-sheet > header")).toHaveCSS(
+  await expect(page.locator(".image-preview-sheet > header")).toHaveCSS(
     "top",
     "0px",
   );
-  await expectSheetHeaderFlush(".remote-file-sheet");
+  await expectSheetHeaderFlush(".image-preview-sheet");
   await expect(page.getByText("/tmp/user.png", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "关闭远程文件" }).click();
+  await expect(page.getByText("100%")).toBeVisible();
+  await page.getByRole("button", { name: "放大图片" }).click();
+  await expect(page.getByText("125%")).toBeVisible();
+  await page.getByRole("button", { name: "关闭图片预览" }).click();
   const previousMessages = page.getByRole("button", {
     name: /之前的 4 条消息/,
   });

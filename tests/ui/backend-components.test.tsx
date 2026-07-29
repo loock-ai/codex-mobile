@@ -165,6 +165,24 @@ describe("多设备界面", () => {
     );
   });
 
+  it("设备管理不会因误触遮罩关闭", () => {
+    const onClose = vi.fn();
+    const { container } = render(
+      <BackendManagerSheet
+        open
+        registry={createDefaultBackendRegistry("http://127.0.0.1:4173")}
+        summaries={{}}
+        onChange={() => undefined}
+        onClose={onClose}
+      />,
+    );
+
+    fireEvent.click(
+      container.querySelector(".backend-manager-backdrop") as HTMLElement,
+    );
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("设备管理支持编辑、暂停、排序和删除", async () => {
     const registry = {
       version: 1 as const,

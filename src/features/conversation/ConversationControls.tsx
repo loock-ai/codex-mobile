@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import { AppIcon, titleOf, type DisplayRecord } from "../../ui/app-display";
+import { ActionSheet } from "../../ui/ActionSheet";
 
 type AnyRecord = Record<string, any>;
 
@@ -115,21 +116,18 @@ export function ConversationStatusSheet({
     void navigator.clipboard?.writeText(String(thread.id ?? ""));
   };
   return (
-    <div className="conversation-sheet-backdrop" onClick={onClose}>
-      <section
-        className="conversation-status-sheet"
-        aria-modal="true"
-        aria-label="状态"
-        role="dialog"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <i className="sheet-handle" aria-hidden="true" />
-        <header>
-          <h2>状态</h2>
-          <button type="button" aria-label="关闭状态" onClick={onClose}>
-            <AppIcon name="close" />
-          </button>
-        </header>
+    <ActionSheet
+      open={open}
+      title="状态"
+      ariaLabel="状态"
+      onClose={onClose}
+      closeLabel="关闭状态"
+      closeIcon={<AppIcon name="close" />}
+      showHandle
+      titleAlign="center"
+      className="conversation-status-sheet"
+      backdropClassName="conversation-sheet-backdrop"
+    >
         <dl>
           <div>
             <dt>对话线程：</dt>
@@ -173,8 +171,7 @@ export function ConversationStatusSheet({
             </dd>
           </div>
         </dl>
-      </section>
-    </div>
+    </ActionSheet>
   );
 }
 

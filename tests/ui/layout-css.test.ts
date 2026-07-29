@@ -179,6 +179,49 @@ describe("悬浮状态布局", () => {
     expect(progressRule).not.toContain("#d4f2da");
   });
 
+  it("图片预览由应用接管双指缩放和拖动手势", () => {
+    const stageRule =
+      styles.match(/(?:^|\n)\.image-preview-stage\s*\{([^}]*)\}/)?.[1] ??
+      "";
+    const imageRule =
+      styles.match(
+        /(?:^|\n)\.image-preview-stage img\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+
+    expect(stageRule).toContain("touch-action: none");
+    expect(stageRule).toContain("overflow: hidden");
+    expect(imageRule).toContain("will-change: transform");
+    const bodyRule =
+      styles.match(
+        /(?:^|\n)\.image-preview-sheet \.action-sheet-body\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+    expect(bodyRule).toContain("overflow-y: auto");
+  });
+
+  it("ActionSheet 统一裁剪圆角且只让中间内容滚动", () => {
+    const sheetRule =
+      styles.match(/(?:^|\n)\.action-sheet\s*\{([^}]*)\}/)?.[1] ?? "";
+    const headerRule =
+      styles.match(
+        /(?:^|\n)\.action-sheet-header\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+    const bodyRule =
+      styles.match(/(?:^|\n)\.action-sheet-body\s*\{([^}]*)\}/)?.[1] ?? "";
+    const footerRule =
+      styles.match(
+        /(?:^|\n)\.action-sheet-footer\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+
+    expect(sheetRule).toContain("overflow: hidden");
+    expect(sheetRule).toContain("isolation: isolate");
+    expect(sheetRule).toContain("border-radius: 30px 30px 0 0");
+    expect(sheetRule).toContain("display: flex");
+    expect(headerRule).toContain("flex: 0 0 auto");
+    expect(bodyRule).toContain("min-height: 0");
+    expect(bodyRule).toContain("overflow-y: auto");
+    expect(footerRule).toContain("flex: 0 0 auto");
+  });
+
   it("普通手机浏览器单独增加上下边缘间距且不改变 WebView", () => {
     const rootRule =
       styles.match(/(?:^|\n):root\s*\{([^}]*)\}/)?.[1] ?? "";

@@ -661,6 +661,22 @@ function isRunningTurnStatus(status: unknown) {
   return ["inProgress", "in_progress", "running"].includes(String(status));
 }
 
+function finiteNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+export function turnDurationMs(turn: ConversationRecord) {
+  const duration = finiteNumber(turn.durationMs);
+  if (duration != null && duration >= 0) return duration;
+  const startedAt = finiteNumber(turn.startedAt);
+  const completedAt = finiteNumber(turn.completedAt);
+  return startedAt != null &&
+    completedAt != null &&
+    completedAt >= startedAt
+    ? (completedAt - startedAt) * 1000
+    : null;
+}
+
 export function groupConversationTurns(
   turns: ConversationRecord[],
 ): ConversationRecord[] {
@@ -678,6 +694,26 @@ export function groupConversationTurns(
     const liveDiff = [previous.liveDiff, turn.liveDiff]
       .filter((value) => typeof value === "string" && value)
       .join("\n");
+    const startedAtValues = [previous.startedAt, turn.startedAt]
+      .map(finiteNumber)
+      .filter((value): value is number => value != null);
+    const completedAtValues = [previous.completedAt, turn.completedAt]
+      .map(finiteNumber)
+      .filter((value): value is number => value != null);
+    const startedAt = startedAtValues.length
+      ? Math.min(...startedAtValues)
+      : null;
+    const completedAt = completedAtValues.length
+      ? Math.max(...completedAtValues)
+      : null;
+    const knownDurations = [turnDurationMs(previous), turnDurationMs(turn)]
+      .filter((value): value is number => value != null);
+    const durationMs =
+      startedAt != null && completedAt != null && completedAt >= startedAt
+        ? (completedAt - startedAt) * 1000
+        : knownDurations.length
+          ? knownDurations.reduce((total, value) => total + value, 0)
+          : null;
     groups[groups.length - 1] = {
       ...previous,
       status:
@@ -686,6 +722,9 @@ export function groupConversationTurns(
           ? "inProgress"
           : (turn.status ?? previous.status),
       items: [...(previous.items ?? []), ...items],
+      ...(startedAt != null ? { startedAt } : {}),
+      ...(completedAt != null ? { completedAt } : {}),
+      ...(durationMs != null ? { durationMs } : {}),
       ...(liveDiff ? { liveDiff } : {}),
     };
   }

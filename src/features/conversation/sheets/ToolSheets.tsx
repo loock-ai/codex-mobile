@@ -3,6 +3,7 @@ import {
   parseUnifiedDiff,
   summarizeFileChange,
 } from "../../../ui/conversation";
+import { ActionSheet } from "../../../ui/ActionSheet";
 import { Chevron } from "../../../ui/icons";
 
 type AnyRecord = Record<string, any>;
@@ -30,12 +31,14 @@ export function ToolDetailSheet({
     item.contentItems ??
     (isFile ? item.changes : null);
   return (
-    <div className="tool-detail-backdrop" onClick={onClose}>
-      <section className="tool-detail-sheet" onClick={(event) => event.stopPropagation()}>
-        <header>
-          <h3>{title}</h3>
-          <button type="button" aria-label="关闭工具详情" onClick={onClose}>×</button>
-        </header>
+    <ActionSheet
+      title={title}
+      onClose={onClose}
+      closeLabel="关闭工具详情"
+      tone="soft"
+      className="tool-detail-sheet"
+      backdropClassName="tool-detail-backdrop"
+    >
         {isCommand && (
           <>
             <h4>命令</h4>
@@ -76,8 +79,7 @@ export function ToolDetailSheet({
             <pre>{typeof output === "string" ? output : JSON.stringify(output, null, 2)}</pre>
           </>
         )}
-      </section>
-    </div>
+    </ActionSheet>
   );
 }
 
@@ -114,21 +116,15 @@ export function FileDiffSheet({
     () => new Set(changes.length ? [0] : []),
   );
   return (
-    <div className="tool-detail-backdrop" onClick={onClose}>
-      <section
-        className="file-diff-sheet"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header>
-          <h3>已更改 {changes.length} 个文件</h3>
-          <button
-            type="button"
-            aria-label="关闭文件修改"
-            onClick={onClose}
-          >
-            •••
-          </button>
-        </header>
+    <ActionSheet
+      title={`已更改 ${changes.length} 个文件`}
+      ariaLabel={`已更改 ${changes.length} 个文件`}
+      onClose={onClose}
+      closeLabel="关闭文件修改"
+      titleAlign="center"
+      className="file-diff-sheet"
+      backdropClassName="tool-detail-backdrop"
+    >
         <div className="file-diff-list">
           {changes.map((change, changeIndex) => {
             const expanded = expandedFiles.has(changeIndex);
@@ -191,7 +187,6 @@ export function FileDiffSheet({
             );
           })}
         </div>
-      </section>
-    </div>
+    </ActionSheet>
   );
 }

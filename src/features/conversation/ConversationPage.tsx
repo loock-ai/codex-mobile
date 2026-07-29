@@ -26,6 +26,7 @@ import {
   ConversationActionMenu,
   ConversationStatusSheet,
 } from "./ConversationControls";
+import { ImagePreviewSheet } from "./sheets/ImagePreviewSheet";
 import { useConversationAutoScroll } from "./conversation-scroll";
 
 export type ConversationLoadState = "idle" | "loading" | "ready" | "error";
@@ -115,6 +116,7 @@ export function ConversationPage({
   onDraftChange: (value: string) => void;
   onInterrupt: () => void | Promise<void>;
 }) {
+  const [previewImage, setPreviewImage] = useState<DraftImage | null>(null);
   const [statusOpen, setStatusOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const turns = groupConversationTurns(active.turns ?? []);
@@ -359,9 +361,17 @@ export function ConversationPage({
           <div className="draft-images" aria-label="待发送图片">
             {draftImages.map((image) => (
               <figure key={image.id}>
-                <img src={image.url} alt={`待发送 ${image.name}`} />
                 <button
                   type="button"
+                  className="draft-image-preview"
+                  aria-label={`预览 ${image.name}`}
+                  onClick={() => setPreviewImage(image)}
+                >
+                  <img src={image.url} alt={`待发送 ${image.name}`} />
+                </button>
+                <button
+                  type="button"
+                  className="draft-image-remove"
                   aria-label={`移除 ${image.name}`}
                   onClick={() => onRemoveImage(image.id)}
                 >
@@ -370,6 +380,14 @@ export function ConversationPage({
               </figure>
             ))}
           </div>
+        )}
+        {previewImage && (
+          <ImagePreviewSheet
+            src={previewImage.url}
+            name={previewImage.name}
+            alt={`待发送 ${previewImage.name}`}
+            onClose={() => setPreviewImage(null)}
+          />
         )}
         {imageReading && (
           <div className="draft-image-reading" role="status" aria-live="polite">
