@@ -64,11 +64,11 @@ describe("多设备界面", () => {
     expect(
       screen.queryByRole("button", { name: "添加或管理设备" }),
     ).toBeNull();
-    expect(
-      screen
-        .getByRole("button", { name: /Mac mini.*进行中/ })
-        .getAttribute("aria-pressed"),
-    ).toBe("true");
+    const selectedMachine = screen.getByRole("button", {
+      name: /Mac mini.*进行中/,
+    });
+    expect(selectedMachine.getAttribute("aria-pressed")).toBe("true");
+    expect(selectedMachine.textContent).not.toContain("▰");
     fireEvent.click(screen.getByRole("button", { name: /MacBook.*2 个待审批/ }));
     expect(onSelect).toHaveBeenCalledWith("macbook");
   });

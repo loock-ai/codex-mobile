@@ -74,7 +74,6 @@ export function BackendSwitcher({
             ) : (
               <i className={`status-dot ${status}`} />
             )}
-            <span aria-hidden="true">▰</span>
             <strong>{backend.name}</strong>
             {summary?.busy && (
               <i className="backend-busy" aria-hidden="true" />
