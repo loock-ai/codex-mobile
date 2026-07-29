@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyRuntimeEnvironment,
   isAndroidWebView,
+  isMobileBrowser,
 } from "../../src/ui/runtime-environment";
 
 describe("运行容器识别", () => {
@@ -25,6 +26,34 @@ describe("运行容器识别", () => {
 
     applyRuntimeEnvironment(root, "Mozilla/5.0 Chrome/138 Safari/537.36");
     expect(root.classList.contains("android-webview")).toBe(false);
+  });
+
+  it("普通手机浏览器使用独立边缘间距，Android WebView 不受影响", () => {
+    const mobileChrome =
+      "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 Chrome/138.0.0.0 Mobile Safari/537.36";
+    const androidWebView =
+      "Mozilla/5.0 (Linux; Android 15; Pixel 9; wv) AppleWebKit/537.36 Version/4.0 Chrome/138.0.0.0 Mobile Safari/537.36";
+    const iosWebView =
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
+    const root = document.createElement("html");
+
+    expect(isMobileBrowser(mobileChrome)).toBe(true);
+    expect(isMobileBrowser(androidWebView)).toBe(false);
+    expect(isMobileBrowser(iosWebView)).toBe(false);
+    applyRuntimeEnvironment(root, mobileChrome);
+    expect(root.classList.contains("mobile-browser")).toBe(true);
+
+    applyRuntimeEnvironment(root, androidWebView);
+    expect(root.classList.contains("mobile-browser")).toBe(false);
+    expect(root.classList.contains("android-webview")).toBe(true);
+    expect(root.classList.contains("native-webview")).toBe(true);
+
+    applyRuntimeEnvironment(root, iosWebView);
+    expect(root.classList.contains("mobile-browser")).toBe(false);
+    expect(root.classList.contains("native-webview")).toBe(true);
+
+    applyRuntimeEnvironment(root, "Mozilla/5.0 Chrome/138 Safari/537.36");
+    expect(root.classList.contains("native-webview")).toBe(false);
   });
 
   it("Android WebView 使用原生顶部安全区作为旧版兼容兜底", () => {

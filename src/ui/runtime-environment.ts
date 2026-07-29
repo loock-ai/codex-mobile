@@ -6,6 +6,22 @@ export function isAndroidWebView(userAgent: string) {
   );
 }
 
+function isIosWebView(userAgent: string) {
+  return (
+    /(?:iPhone|iPad|iPod)/i.test(userAgent) &&
+    /AppleWebKit/i.test(userAgent) &&
+    !/Safari\//i.test(userAgent)
+  );
+}
+
+export function isMobileBrowser(userAgent: string) {
+  return (
+    /(?:Android|iPhone|iPad|iPod|Mobile)/i.test(userAgent) &&
+    !isAndroidWebView(userAgent) &&
+    !isIosWebView(userAgent)
+  );
+}
+
 export interface AndroidWebViewBridge {
   safeAreaTopCssPx?: () => number;
 }
@@ -16,7 +32,10 @@ export function applyRuntimeEnvironment(
   bridge?: AndroidWebViewBridge,
 ) {
   const androidWebView = isAndroidWebView(userAgent);
+  const nativeWebView = androidWebView || isIosWebView(userAgent);
   root.classList.toggle("android-webview", androidWebView);
+  root.classList.toggle("native-webview", nativeWebView);
+  root.classList.toggle("mobile-browser", isMobileBrowser(userAgent));
   root.style.removeProperty("--native-safe-area-top");
 
   if (!androidWebView || typeof bridge?.safeAreaTopCssPx !== "function") {

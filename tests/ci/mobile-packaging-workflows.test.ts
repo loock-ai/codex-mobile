@@ -168,7 +168,10 @@ describe("移动 App 内置前端流水线", () => {
       "--native-safe-area-top: 0px",
     );
     expect(readProjectFile("src/styles.css")).toContain(
-      "--safe-area-top: max(env(safe-area-inset-top, 0px), var(--native-safe-area-top))",
+      "--safe-area-top: max(env(safe-area-inset-top, 0px), var(--native-safe-area-top), var(--browser-edge-top))",
+    );
+    expect(readProjectFile("src/styles.css")).toContain(
+      "html.native-webview { --browser-edge-top: 0px; --browser-edge-bottom: 0px; }",
     );
     expect(source).toContain("vip.loock.codexmobile");
     expect(source).not.toContain("matrix:");
