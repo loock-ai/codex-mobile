@@ -1,47 +1,62 @@
-# Codex Mobile Web
+# Codex Mobile
 
-一个面向手机与局域网场景的 Codex Remote 客户端。它使用 React 构建接近原生
-移动 App 的会话体验，通过轻量网关直接连接官方 Codex `app-server` V2
-双向 JSON-RPC，同时支持浏览器、Android 和 iOS 三种使用形态。
+[![Build Android App](https://github.com/loock-ai/codex-mobile/actions/workflows/build-android.yml/badge.svg)](https://github.com/loock-ai/codex-mobile/actions/workflows/build-android.yml)
+[![Build iOS App](https://github.com/loock-ai/codex-mobile/actions/workflows/build-ios.yml/badge.svg)](https://github.com/loock-ai/codex-mobile/actions/workflows/build-ios.yml)
+[![npm](https://img.shields.io/npm/v/codex-mobile)](https://www.npmjs.com/package/codex-mobile)
+[![Apache-2.0](https://img.shields.io/github/license/loock-ai/codex-mobile)](LICENSE)
+![平台](https://img.shields.io/badge/platform-Web%20%7C%20Android%20%7C%20iOS-111111)
+![状态](https://img.shields.io/badge/status-active%20prototype-555555)
 
-> 当前版本：`0.2.0`
->
-> 许可证：Apache-2.0
+Codex Mobile 把运行在 Mac 上的真实 Codex 工作流，变成适合手机触控、随时查看和继续
+操作的远程工作台。
 
-## 项目背景
+它不是一个模拟 Codex 的聊天壳，也不是把终端页面缩小后塞进 WebView。移动端通过
+轻量网关直接连接官方 Codex `app-server` V2，复用真实会话、工具调用、审批和本机
+项目，并支持同时管理多台 Mac。
 
-Codex Desktop 适合在电脑上完成开发任务，但在离开桌面、查看长任务进度、处理审批
-或继续一段会话时，手机端缺少轻量、完整且适合触控的入口。直接复用桌面网页会带来
-布局密度、移动端交互和多设备管理问题；直接让浏览器连接原始 `app-server`，又会
-暴露进程管理、浏览器握手和局域网访问控制等边界。
+快速入口：[当前能力](#当前能力) · [快速开始](#快速开始) ·
+[系统架构](#系统架构) · [移动-app-构建](#移动-app-构建) ·
+[已知边界](#已知边界)
 
-本项目因此采用“移动优先前端 + 透明网关 + 官方 app-server”的结构：
+## 为什么做这个项目
 
-- 前端参考 ChatGPT Android Remote 的信息层级和交互习惯，但不复制私有实现。
-- 业务协议直接使用 Codex `app-server` V2，不建立另一套会话数据库或业务 API。
-- 每台 Mac 运行自己的网关和 app-server，手机可以同时连接多台设备。
-- Web 与移动 App 复用同一份前端；App 内置静态资源，但不内置后端地址或口令。
+Codex Desktop 很适合坐在电脑前完成开发任务，但长任务运行后，用户还需要在手机上：
 
-它的目标不是替代 Codex Desktop，而是为局域网和可信网络中的移动查看、继续对话、
-审批与多设备切换提供一个独立入口。
+- 查看任务进度和最终结果；
+- 处理命令、文件修改与补充信息审批；
+- 继续已有会话或快速发起新任务；
+- 在 MacBook、Mac mini 等多台开发机器之间切换。
 
-## 产品目标
+Codex Mobile 解决的不是“手机能不能打开一个聊天页面”，而是如何让真实 Coding Agent
+工作流在移动场景下仍然可读、可控、可恢复。
 
-项目需求由现有开发会话归并为以下几条主线：
+## 这个项目不一样的地方
 
-1. **保持协议兼容**：尽量透明地使用官方 app-server 方法、通知和审批请求。
-2. **提供原生感移动体验**：紧凑布局、安全区适配、侧边栏、吸顶控件、底部 Sheet
-   和适合触控的输入区。
-3. **管理多台 Codex 设备**：一个客户端最多保存 8 个网关，同时维持已启用设备的
-   连接、运行状态和待审批数量。
-4. **让大量会话仍然可用**：按机器和项目组织会话，渐进加载项目列表，并对长会话
-   使用 turns 分页。
-5. **覆盖真实工作流**：继续已有会话、新建任务、选择模型与权限、上传图片、处理中断
-   与审批、查看工具调用、文件和 Diff。
-6. **同时支持 Web 与移动 App**：普通浏览器直接访问网关；Android/iOS App 内置前端，
-   首次启动时由用户添加设备。
+- **连接真实 Codex 后端**：直接使用 `app-server` V2，不维护一套伪造的会话协议。
+- **多机器统一入口**：一个客户端可以汇总多台 Mac 的会话、项目、运行状态和审批。
+- **按移动端重新设计**：侧边栏、项目分组、底部操作面板、长会话折叠和触控输入都针对
+  手机屏幕实现。
+- **前后台恢复**：针对 App 切到后台、网络切换和半开 WebSocket 主动探测并恢复连接。
+- **网关保持透明**：网关负责访问控制、进程管理和双向转发，不复制或长期保存会话内容。
+- **三种使用形态**：同一套前端可运行在普通浏览器、Android App 和 iOS App 中。
 
-## 核心能力
+## 当前状态
+
+这是一个持续在真实多设备环境中使用和打磨的活跃原型，而不是概念演示：
+
+- 前端基于 React、TypeScript 和 Vite；
+- 后端是可通过 npm 安装的轻量网关，连接本机 Codex CLI 的 `app-server`；
+- Android 与 iOS 使用内置前端资源，不会打包私人网关地址或访问口令；
+- Android、iOS、npm 包和网关在发布时使用同一个版本号；
+- 当前界面和文档以中文为主。
+
+## 截图
+
+| 会话列表 | 对话详情 | 设备设置 |
+| --- | --- | --- |
+| ![会话列表](docs/assets/mobile-reference/remote-thread-list.jpg) | ![对话详情](docs/assets/mobile-reference/conversation-detail.jpg) | ![设备设置](docs/assets/mobile-reference/e2e-mobile-settings-final.png) |
+
+## 当前能力
 
 ### 多设备与会话组织
 
@@ -282,10 +297,11 @@ http://<设备局域网地址>:18766/?token=<该设备口令>
 
 ## 移动 App 构建
 
-仓库包含两个 GitHub Actions 工作流：
+仓库包含三个 GitHub Actions 工作流：
 
 - `.github/workflows/build-android.yml`
 - `.github/workflows/build-ios.yml`
+- `.github/workflows/publish-npm.yml`
 
 流水线先构建当前仓库的 `dist/`，再把静态资源放入固定版本的 PakePlus 原生容器。
 产物只包含通用前端，不包含固定后端地址、局域网 Token 或私有配置。
@@ -295,13 +311,15 @@ Android 流水线保留手动构建，同时在 `main` 的前端代码发生变�
 App 会自动检查正式 Release；发现新版本后由用户确认下载，校验通过后调起系统安装器。
 首次使用需要在 Android 系统中允许 Codex Mobile 安装未知应用，App 不支持静默安装。
 
-iOS 流水线仍为手动构建，生成未签名 IPA；正式分发需在自己的 Apple Developer 环境中
-完成签名。
+GitHub Release 发布后会以同一个标签触发 iOS 构建和 npm 发布，使 Android、iOS、
+`codex-mobile` npm 包及网关报告的版本保持一致。iOS 流水线生成未签名 IPA；正式
+分发仍需在自己的 Apple Developer 环境中完成签名。
 
 ## 项目结构
 
 ```text
-codex-web-mobile/
+codex-mobile/
+├── bin/                 # npm CLI、授权链接和终端二维码
 ├── src/
 │   ├── app-server/       # V2 客户端、会话恢复、分页与列表加载
 │   ├── backends/         # 多设备注册表、探测和连接管理
@@ -327,6 +345,16 @@ npm run test:e2e
 [`protocol/app-server-v2/README.md`](./protocol/app-server-v2/README.md)，总体设计见
 [`docs/plans/2026-07-26-codex-mobile-web-design.md`](./docs/plans/2026-07-26-codex-mobile-web-design.md)。
 
+## 仓库边界
+
+公开仓库包含通用前端、透明网关、测试和移动端构建配置，不包含具体设备的私人运行
+环境。仓库和正式构建产物中不会写入：
+
+- 局域网地址、网关 Token 或 npm 发布令牌；
+- Codex 登录态、API 密钥和本机会话历史；
+- 用户项目内容与 `~/.codex` 数据；
+- Android 签名文件、Apple Developer 证书或设备专用配置。
+
 ## 已知边界
 
 - Codex app-server 协议随 CLI 版本演进；分页、置顶等能力应以实际运行版本生成的
@@ -340,3 +368,12 @@ npm run test:e2e
 - 当前 Token 方案适用于可信局域网，不等同于面向公网的完整身份认证系统。
 - iOS 自动化产物未签名；真实设备安装、推送和 TestFlight 不在当前仓库的无证书
   构建范围内。
+
+## 说明
+
+Codex Mobile 是独立开源项目，与 OpenAI 官方没有隶属关系。Codex、Codex CLI 和
+`app-server` 的可用能力及兼容性以实际安装版本为准。
+
+## 许可证
+
+本项目使用 [Apache License 2.0](LICENSE)。
