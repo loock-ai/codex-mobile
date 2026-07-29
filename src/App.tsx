@@ -80,6 +80,10 @@ import {
   saveBackendRegistry,
 } from "./backends/registry";
 import { BackendConnectionManager } from "./backends/connection-manager";
+import {
+  bindConnectionRecovery,
+  recoverBackendConnection,
+} from "./backends/connection-recovery";
 import { fetchBackendHostInfo, fetchBackendProjects } from "./backends/probe";
 import type {
   BackendConfig,
@@ -210,6 +214,7 @@ function BackendWorkspace({
   const [notice, setNotice] = useState("");
   const [picker, setPicker] = useState<ComposerPicker>(null);
   const clientRef = useRef<AppServerClient | null>(null);
+  const connectionManagerRef = useRef<BackendConnectionManager | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const imageReadGenerationRef = useRef(new ImageReadGeneration());
   const draftContextGenerationRef = useRef(0);
@@ -407,6 +412,10 @@ function BackendWorkspace({
     fullyLoadedProjectCwdsRef.current.clear();
     setThreadListState((current) => (projects.length ? current : "loading"));
     setRefreshing(true);
+    if (!clientRef.current) {
+      connectionManagerRef.current?.reconnect(backend.id);
+      return;
+    }
     void loadThreads()
       .catch(() => undefined)
       .finally(() => {
@@ -423,8 +432,12 @@ function BackendWorkspace({
         setConnection(status);
         if (status === "online") setError("");
         if (connectionError) setError(connectionError);
+        if (status === "connecting") {
+          clientRef.current = null;
+        }
         if (status === "offline") {
           clientRef.current = null;
+          setRefreshing(false);
           setBusy(false);
           setSteering(false);
           setPendingSteerMessage(null);
@@ -730,6 +743,8 @@ function BackendWorkspace({
               (current) => config.approvals_reviewer || current,
             );
             await loadThreads(client);
+            if (disposed || manager.client(backend.id) !== source) return;
+            setRefreshing(false);
             const currentThread = activeRef.current;
             if (currentThread?.id) {
               activeThreadTargetRef.current = currentThread.id;
@@ -775,7 +790,11 @@ function BackendWorkspace({
             }
           }
           } catch (reason) {
-            if (!disposed) {
+            if (
+              !disposed &&
+              manager.client(backend.id) === source
+            ) {
+              setRefreshing(false);
               setError(
                 reason instanceof Error ? reason.message : String(reason),
               );
@@ -790,10 +809,22 @@ function BackendWorkspace({
         })();
       },
     });
+    connectionManagerRef.current = manager;
     manager.sync([backend]);
+    const unbindConnectionRecovery = bindConnectionRecovery({
+      reconnect: () =>
+        recoverBackendConnection(
+          clientRef.current,
+          () => manager.reconnect(backend.id),
+        ),
+    });
     return () => {
       disposed = true;
+      unbindConnectionRecovery();
       manager.close();
+      if (connectionManagerRef.current === manager) {
+        connectionManagerRef.current = null;
+      }
       clientRef.current = null;
     };
   }, [backend.baseUrl, backend.id, backend.token]);

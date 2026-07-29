@@ -1,0 +1,73 @@
+import type { AppServerClient } from "../app-server/client";
+
+interface VisibilityTarget extends EventTarget {
+  visibilityState: DocumentVisibilityState;
+}
+
+interface ConnectionRecoveryOptions {
+  documentTarget?: VisibilityTarget;
+  windowTarget?: EventTarget;
+  reconnect: () => void | Promise<void>;
+}
+
+export async function recoverBackendConnection(
+  client: AppServerClient | null,
+  reconnect: () => void,
+) {
+  if (!client) {
+    reconnect();
+    return;
+  }
+  try {
+    await client.request(
+      "thread/list",
+      { limit: 1, sortKey: "updated_at" },
+      { timeoutMs: 2_500 },
+    );
+  } catch {
+    reconnect();
+  }
+}
+
+export function bindConnectionRecovery({
+  documentTarget = document,
+  windowTarget = window,
+  reconnect,
+}: ConnectionRecoveryOptions) {
+  let wasHidden = documentTarget.visibilityState === "hidden";
+  let recoveryPromise: Promise<void> | null = null;
+
+  const requestRecovery = () => {
+    if (recoveryPromise) return;
+    recoveryPromise = Promise.resolve(reconnect()).finally(() => {
+      recoveryPromise = null;
+    });
+  };
+  const onVisibilityChange = () => {
+    if (documentTarget.visibilityState === "hidden") {
+      wasHidden = true;
+      return;
+    }
+    if (!wasHidden) return;
+    wasHidden = false;
+    requestRecovery();
+  };
+  const onPageShow = (event: Event) => {
+    if (!(event as PageTransitionEvent).persisted) return;
+    requestRecovery();
+  };
+  const onOnline = () => requestRecovery();
+
+  documentTarget.addEventListener("visibilitychange", onVisibilityChange);
+  windowTarget.addEventListener("pageshow", onPageShow);
+  windowTarget.addEventListener("online", onOnline);
+
+  return () => {
+    documentTarget.removeEventListener(
+      "visibilitychange",
+      onVisibilityChange,
+    );
+    windowTarget.removeEventListener("pageshow", onPageShow);
+    windowTarget.removeEventListener("online", onOnline);
+  };
+}

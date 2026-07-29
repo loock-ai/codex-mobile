@@ -143,6 +143,17 @@ export class BackendConnectionManager {
     return this.entries.get(backendId)?.socket ?? null;
   }
 
+  reconnect(backendId: string) {
+    if (this.disposed) return;
+    const config = this.desired.get(backendId);
+    if (!config) return;
+    this.disconnect(backendId, false);
+    const retryTimer = this.retryTimers.get(backendId);
+    if (retryTimer) clearTimeout(retryTimer);
+    this.retryTimers.delete(backendId);
+    this.connect(config, 0);
+  }
+
   close() {
     if (this.disposed) return;
     this.disposed = true;

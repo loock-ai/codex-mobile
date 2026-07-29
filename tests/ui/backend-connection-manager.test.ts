@@ -288,4 +288,46 @@ describe("多后端连接池", () => {
     manager.close();
     vi.useRealTimers();
   });
+
+  it("可以主动关闭疑似半开连接并立即创建新连接", async () => {
+    const sockets: FakeSocket[] = [];
+    const manager = new BackendConnectionManager({
+      createSocket: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+      createClient: () => new FakeClient(),
+    });
+    manager.sync([backend("mini", "http://192.168.100.8:4173")]);
+    sockets[0].open();
+    await flush();
+
+    manager.reconnect("mini");
+
+    expect(sockets[0].closed).toBe(true);
+    expect(sockets).toHaveLength(2);
+    expect(manager.socket("mini")).toBe(sockets[1]);
+    manager.close();
+  });
+
+  it("主动重连可以替换永久停在 CONNECTING 的旧连接", () => {
+    const sockets: FakeSocket[] = [];
+    const manager = new BackendConnectionManager({
+      createSocket: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+      createClient: () => new FakeClient(),
+    });
+    manager.sync([backend("mini", "http://192.168.100.8:4173")]);
+
+    manager.reconnect("mini");
+
+    expect(sockets[0].closed).toBe(true);
+    expect(sockets).toHaveLength(2);
+    expect(manager.socket("mini")).toBe(sockets[1]);
+    manager.close();
+  });
 });

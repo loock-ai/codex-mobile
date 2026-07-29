@@ -9,20 +9,39 @@ export interface RpcMessage {
 type NotificationListener = (message: RpcMessage) => void;
 type RequestListener = (message: RpcMessage) => void;
 
+interface PendingRequest {
+  resolve: (value: unknown) => void;
+  reject: (reason: unknown) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
+interface AppServerClientOptions {
+  requestTimeoutMs?: number;
+}
+
+export interface AppServerRequestOptions {
+  timeoutMs?: number;
+}
+
 export class AppServerClient {
   private nextId = 1;
-  private pending = new Map<
-    number | string,
-    { resolve: (value: unknown) => void; reject: (reason: unknown) => void }
-  >();
+  private pending = new Map<number | string, PendingRequest>();
   private notificationListeners = new Set<NotificationListener>();
   private requestListeners = new Set<RequestListener>();
+  private readonly requestTimeoutMs: number;
 
-  constructor(private readonly socket: WebSocket) {
+  constructor(
+    private readonly socket: WebSocket,
+    options: AppServerClientOptions = {},
+  ) {
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
     socket.addEventListener("message", (event) => this.receive(String(event.data)));
     socket.addEventListener("close", () => {
       const error = new Error("与 app-server 的连接已断开");
-      for (const waiter of this.pending.values()) waiter.reject(error);
+      for (const waiter of this.pending.values()) {
+        clearTimeout(waiter.timeout);
+        waiter.reject(error);
+      }
       this.pending.clear();
     });
   }
@@ -36,14 +55,37 @@ export class AppServerClient {
     return result;
   }
 
-  request<T = unknown>(method: string, params: unknown): Promise<T> {
+  request<T = unknown>(
+    method: string,
+    params: unknown,
+    options: AppServerRequestOptions = {},
+  ): Promise<T> {
     const id = this.nextId++;
-    this.send({ id, method, params });
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, {
+      if (this.socket.readyState !== WebSocket.OPEN) {
+        reject(new Error("与 app-server 的连接不可用"));
+        return;
+      }
+      const timeout = setTimeout(() => {
+        if (!this.pending.delete(id)) return;
+        reject(new Error(`${method} 请求超时`));
+        if (this.socket.readyState === WebSocket.OPEN) {
+          this.socket.close(4000, "request timeout");
+        }
+      }, options.timeoutMs ?? this.requestTimeoutMs);
+      const pending: PendingRequest = {
         resolve: resolve as (value: unknown) => void,
         reject,
-      });
+        timeout,
+      };
+      this.pending.set(id, pending);
+      try {
+        this.send({ id, method, params });
+      } catch (reason) {
+        clearTimeout(timeout);
+        this.pending.delete(id);
+        reject(reason);
+      }
     });
   }
 
@@ -84,6 +126,7 @@ export class AppServerClient {
       const waiter = this.pending.get(message.id);
       if (!waiter) return;
       this.pending.delete(message.id);
+      clearTimeout(waiter.timeout);
       if (message.error) waiter.reject(new Error(message.error.message));
       else waiter.resolve(message.result);
       return;
