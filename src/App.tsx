@@ -29,6 +29,7 @@ import {
 import {
   activeTurnId,
   buildTurnSteerParams,
+  clearPendingSteerForItem,
   clearPendingSteerForRequest,
   clearPendingSteerForThread,
   mergeSteerDraft,
@@ -506,11 +507,17 @@ function BackendWorkspace({
             });
           }
           if (message.method === "item/started" && params.item) {
+            setPendingSteerMessage((current) =>
+              clearPendingSteerForItem(current, params),
+            );
             setActive((current) =>
               current ? applyTurnItem(current, params) : current,
             );
           }
           if (message.method === "item/completed" && params.item) {
+            setPendingSteerMessage((current) =>
+              clearPendingSteerForItem(current, params),
+            );
             setActive((current) =>
               current ? applyTurnItem(current, params) : current,
             );

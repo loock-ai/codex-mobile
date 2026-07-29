@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   activeTurnId,
   buildTurnSteerParams,
+  clearPendingSteerForItem,
   clearPendingSteerForRequest,
   clearPendingSteerForThread,
   mergeSteerDraft,
@@ -49,6 +50,33 @@ describe("运行中引导", () => {
     expect(clearPendingSteerForRequest(pending, "steer-1")).toBeNull();
     expect(clearPendingSteerForThread(pending, "thread-other")).toBe(pending);
     expect(clearPendingSteerForThread(pending, "thread-1")).toBeNull();
+  });
+
+  it("对应引导用户消息进入时间线时立即移除临时悬浮副本", () => {
+    const pending = {
+      id: "steer-1",
+      threadId: "thread-1",
+      text: "继续",
+    };
+
+    expect(
+      clearPendingSteerForItem(pending, {
+        threadId: "thread-1",
+        item: { id: "other-item", type: "userMessage", text: "其他引导" },
+      }),
+    ).toBe(pending);
+    expect(
+      clearPendingSteerForItem(pending, {
+        threadId: "thread-1",
+        item: { id: "steer-1", type: "agentMessage", text: "继续" },
+      }),
+    ).toBe(pending);
+    expect(
+      clearPendingSteerForItem(pending, {
+        threadId: "thread-1",
+        item: { id: "steer-1", type: "userMessage", text: "继续" },
+      }),
+    ).toBeNull();
   });
 
   it("构造 app-server turn/steer 所需的精确参数", () => {

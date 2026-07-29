@@ -141,6 +141,14 @@ describe("悬浮状态布局", () => {
     expect(rule).toContain("white-space: nowrap");
   });
 
+  it("短用户消息气泡按内容收缩，不占满最大宽度", () => {
+    const rule =
+      styles.match(/(?:^|\n)\.user-bubble\s*\{([^}]*)\}/)?.[1] ?? "";
+
+    expect(rule).toContain("width: fit-content");
+    expect(rule).toContain("max-width: 82%");
+  });
+
   it("流式字符提示使用清晰的旋转圆环 Loading", () => {
     const ringRule =
       styles.match(

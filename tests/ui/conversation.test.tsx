@@ -737,6 +737,47 @@ describe("移动端对话格式", () => {
     expect(view.queryByRole("button", { name: /之前的/ })).toBeNull();
   });
 
+  it("连续多个引导消息按顺序各展示一次", () => {
+    const { container } = render(
+      <TurnCard
+        turn={{
+          id: "turn-steered-twice",
+          status: "completed",
+          items: [
+            { id: "u-initial", type: "userMessage", text: "先检查问题" },
+            {
+              id: "a-initial",
+              type: "agentMessage",
+              phase: "final_answer",
+              text: "开始检查",
+            },
+            { id: "u-steer-1", type: "userMessage", text: "先修复测试" },
+            {
+              id: "a-steer-1",
+              type: "agentMessage",
+              phase: "final_answer",
+              text: "测试已修复",
+            },
+            { id: "u-steer-2", type: "userMessage", text: "再运行构建" },
+            {
+              id: "a-steer-2",
+              type: "agentMessage",
+              phase: "final_answer",
+              text: "构建已通过",
+            },
+          ],
+        }}
+        client={null}
+      />,
+    );
+    const view = within(container);
+
+    expect(view.getAllByText("先修复测试")).toHaveLength(1);
+    expect(view.getAllByText("再运行构建")).toHaveLength(1);
+    expect(view.getAllByText("测试已修复")).toHaveLength(1);
+    expect(view.getAllByText("构建已通过")).toHaveLength(1);
+  });
+
   it("没有 AI 最终回复时不丢弃过程 item", () => {
     const command = { id: "c1", type: "commandExecution" };
     expect(splitCompletedTurnResponses([command])).toEqual({

@@ -44,6 +44,21 @@ export function clearPendingSteerForThread(
   return current?.threadId === threadId ? null : current;
 }
 
+export function clearPendingSteerForItem(
+  current: PendingSteerMessage | null,
+  params: { threadId?: unknown; item?: DisplayRecord },
+) {
+  if (
+    !current ||
+    current.threadId !== String(params.threadId ?? "") ||
+    params.item?.type !== "userMessage" ||
+    String(params.item.id ?? "") !== current.id
+  ) {
+    return current;
+  }
+  return null;
+}
+
 export function buildTurnSteerParams({
   threadId,
   turnId,
