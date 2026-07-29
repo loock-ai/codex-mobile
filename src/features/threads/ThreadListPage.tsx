@@ -151,7 +151,11 @@ export function ThreadListPage({
               aria-busy={refreshing}
               onClick={onRefresh}
             >
-              <AppIcon name="refresh" />
+              {refreshing ? (
+                <i className="sidebar-refresh-spinner" aria-hidden="true" />
+              ) : (
+                <AppIcon name="refresh" />
+              )}
             </button>
             <button
               className="round-button"

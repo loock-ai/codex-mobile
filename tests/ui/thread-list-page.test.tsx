@@ -132,6 +132,8 @@ describe("会话侧边栏列表", () => {
 
     expect(refresh.getAttribute("aria-busy")).toBe("true");
     expect(refresh.classList.contains("refreshing")).toBe(true);
+    expect(refresh.querySelector(".sidebar-refresh-spinner")).not.toBeNull();
+    expect(refresh.querySelector("svg")).toBeNull();
   });
 
   it("单机视图只按项目分组且行内不重复机器项目", () => {

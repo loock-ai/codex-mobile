@@ -35,12 +35,29 @@ describe("侧边栏刷新视觉", () => {
     expect(selectedRule).not.toContain("box-shadow");
   });
 
-  it("刷新按钮在刷新期间持续旋转", () => {
+  it("刷新按钮在刷新期间使用有头有尾的渐变圆环", () => {
     const rule =
       styles.match(
-        /(?:^|\n)\.list-header-actions \.round-button\.refreshing svg\s*\{([^}]*)\}/,
+        /(?:^|\n)\.sidebar-refresh-spinner\s*\{([^}]*)\}/,
       )?.[1] ?? "";
 
-    expect(rule).toContain("animation:");
+    expect(rule).toContain("width: 18px");
+    expect(rule).toContain("height: 18px");
+    expect(rule).toContain("--spinner-stroke: 2.5px");
+    expect(rule).toContain("--spinner-head: #111");
+  });
+
+  it("机器、会话与项目 Loading 共用渐变头尾模式", () => {
+    const sharedRule =
+      styles.match(
+        /(?:^|\n)\.backend-loading, \.project-more \.action-spinner, \.backend-busy, \.running-spinner, \.sidebar-refresh-spinner\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+
+    expect(sharedRule).toContain("background: conic-gradient(");
+    expect(sharedRule).toContain("var(--spinner-tail)");
+    expect(sharedRule).toContain("var(--spinner-head)");
+    expect(sharedRule).toContain("var(--spinner-stroke, 2px)");
+    expect(sharedRule).toContain("mask:");
+    expect(sharedRule).toContain("animation: thread-spin");
   });
 });
