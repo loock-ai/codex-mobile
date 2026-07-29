@@ -1,20 +1,9 @@
 name: Build iOS App
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "src/**"
-      - "public/**"
-      - "index.html"
-      - "package.json"
-      - "package-lock.json"
-      - "tsconfig*.json"
-      - "vite.config.ts"
-      - "docs/assets/app-icon/codex-mobile-app-icon-1024.png"
-      - "scripts/compose-mobile-app-icon.sh"
-      - ".github/workflows/build-ios.yml"
+  release:
+    types:
+      - published
   workflow_dispatch:
 
 permissions:
@@ -28,7 +17,6 @@ env:
   APP_NAME: CodexMobile
   DISPLAY_NAME: Codex Mobile
   APP_ID: vip.loock.codexmobile
-  APP_VERSION: "1.0.0"
 
 jobs:
   build:
@@ -39,7 +27,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
           persist-credentials: false
+
+      - name: Resolve app version
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$RELEASE_TAG" ]]; then
+            version="${RELEASE_TAG#v}"
+          else
+            version="$(node -p "require('./package.json').version")"
+          fi
+          node -e '
+            const version = process.argv[1];
+            if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+              throw new Error(`Invalid app version: ${version}`);
+            }
+          ' "$version"
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Checkout pinned PakePlus iOS
         uses: actions/checkout@v4
@@ -91,7 +99,7 @@ jobs:
         run: |
           set -euo pipefail
           npm ci
-          npm run build
+          VITE_APP_VERSION="$APP_VERSION" npm run build
           test -s dist/index.html
           grep -Eq '(src|href)="\./assets/' dist/index.html
           cat > "$RUNNER_TEMP/scan-mobile-assets.cjs" <<'NODE'
@@ -108,7 +116,7 @@ jobs:
             "https://react.dev/errors/",
           ];
           const allowedUrls = new Set([
-            "http://host.local:4173/?token=xxx",
+            "http://host.local:18766/?token=xxx",
             "https://www.pakeplus.com/",
           ]);
           const endpointPatterns = [
@@ -221,6 +229,7 @@ jobs:
               | .ios.pubBody = ($displayName + " v" + $version)
               | .ios.isHtml = true
               | .ios.debug = false
+              | .phone.camera = true
             ' scripts/ppconfig.json > "$RUNNER_TEMP/ppconfig-ios.json"
           mv "$RUNNER_TEMP/ppconfig-ios.json" scripts/ppconfig.json
           jq -e \
@@ -231,6 +240,7 @@ jobs:
               and .ios.version == $version
               and .ios.isHtml == true
               and .ios.webUrl == ""
+              and .phone.camera == true
             ' scripts/ppconfig.json > /dev/null
 
       - name: Install PakePlus dependencies
@@ -253,6 +263,12 @@ jobs:
             "$plist"
           /usr/libexec/PlistBuddy -c "Delete :UIBackgroundModes" \
             "$plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy \
+            -c "Add :NSCameraUsageDescription string 扫描 Codex Mobile 网关连接二维码" \
+            "$plist" 2>/dev/null \
+            || /usr/libexec/PlistBuddy \
+              -c "Set :NSCameraUsageDescription 扫描 Codex Mobile 网关连接二维码" \
+              "$plist"
           /usr/libexec/PlistBuddy \
             -c "Delete :NSLocationWhenInUseUsageDescription" \
             "$plist" 2>/dev/null || true
@@ -315,6 +331,8 @@ jobs:
             "$plist")" = "true"
           test -n "$(/usr/libexec/PlistBuddy \
             -c 'Print :NSLocalNetworkUsageDescription' "$plist")"
+          test -n "$(/usr/libexec/PlistBuddy \
+            -c 'Print :NSCameraUsageDescription' "$plist")"
           if /usr/libexec/PlistBuddy \
             -c 'Print :NSAppTransportSecurity:NSAllowsArbitraryLoads' \
             "$plist" >/dev/null 2>&1; then
@@ -373,6 +391,8 @@ jobs:
             | grep -q .
           test "$(/usr/libexec/PlistBuddy -c 'Print :DEBUG' \
             "$app/Info.plist")" = "false"
+          test -n "$(/usr/libexec/PlistBuddy \
+            -c 'Print :NSCameraUsageDescription' "$app/Info.plist")"
           test "$(/usr/libexec/PlistBuddy \
             -c 'Print :NSAppTransportSecurity:NSAllowsLocalNetworking' \
             "$app/Info.plist")" = "true"

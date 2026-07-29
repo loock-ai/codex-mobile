@@ -136,7 +136,7 @@ jobs:
             "https://react.dev/errors/",
           ];
           const allowedUrls = new Set([
-            "http://host.local:4173/?token=xxx",
+            "http://host.local:18766/?token=xxx",
             "https://www.pakeplus.com/",
           ]);
           const endpointPatterns = [
@@ -272,6 +272,7 @@ jobs:
               | .android.safeArea = "all"
               | .android.debug = false
               | .phone.internet = true
+              | .phone.camera = true
             ' scripts/ppconfig.json > "$RUNNER_TEMP/ppconfig-android.json"
           mv "$RUNNER_TEMP/ppconfig-android.json" scripts/ppconfig.json
           jq -e \
@@ -284,6 +285,7 @@ jobs:
               and .android.safeArea == "all"
               and .android.webUrl == ""
               and .phone.internet == true
+              and .phone.camera == true
             ' scripts/ppconfig.json > /dev/null
           grep -Fq 'android:usesCleartextTraffic="true"' \
             app/src/main/AndroidManifest.xml
@@ -317,20 +319,21 @@ jobs:
           allowed_permissions = {
               "android.permission.INTERNET",
               "android.permission.ACCESS_NETWORK_STATE",
+              "android.permission.CAMERA",
               "android.permission.REQUEST_INSTALL_PACKAGES",
           }
-          if not any(
-              child.tag == "uses-permission"
-              and child.get(f"{{{android}}}name")
-                  == "android.permission.REQUEST_INSTALL_PACKAGES"
-              for child in root
+          for required_permission in (
+              "android.permission.CAMERA",
+              "android.permission.REQUEST_INSTALL_PACKAGES",
           ):
-              permission = ET.Element("uses-permission")
-              permission.set(
-                  f"{{{android}}}name",
-                  "android.permission.REQUEST_INSTALL_PACKAGES",
-              )
-              root.insert(0, permission)
+              if not any(
+                  child.tag == "uses-permission"
+                  and child.get(f"{{{android}}}name") == required_permission
+                  for child in root
+              ):
+                  permission = ET.Element("uses-permission")
+                  permission.set(f"{{{android}}}name", required_permission)
+                  root.insert(0, permission)
           for child in list(root):
               if child.tag == "uses-permission":
                   name = child.get(f"{{{android}}}name", "")
@@ -690,7 +693,7 @@ jobs:
           grep -Fq 'update_file_paths' app/src/main/AndroidManifest.xml
           test -s app/src/main/res/xml/update_file_paths.xml
           if grep -Eq \
-            'ACCESS_(FINE|COARSE)_LOCATION|CAMERA|RECORD_AUDIO|EXTERNAL_STORAGE|READ_MEDIA|SYSTEM_ALERT_WINDOW|dataExtractionRules|fullBackupContent' \
+            'ACCESS_(FINE|COARSE)_LOCATION|RECORD_AUDIO|EXTERNAL_STORAGE|READ_MEDIA|SYSTEM_ALERT_WINDOW|dataExtractionRules|fullBackupContent' \
             app/src/main/AndroidManifest.xml; then
             echo "::error::Android manifest contains an unnecessary capability"
             exit 1
@@ -739,6 +742,7 @@ jobs:
           allowed_permissions = {
               "android.permission.INTERNET",
               "android.permission.ACCESS_NETWORK_STATE",
+              "android.permission.CAMERA",
               "android.permission.REQUEST_INSTALL_PACKAGES",
               dynamic_receiver_permission,
           }

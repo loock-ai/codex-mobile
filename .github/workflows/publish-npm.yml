@@ -1,0 +1,67 @@
+name: Publish npm Package
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish codex-mobile to npm
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout released source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Match npm version to GitHub Release
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          node -e '
+            const version = process.argv[1];
+            if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+              throw new Error(`Invalid release version: ${version}`);
+            }
+          ' "$version"
+          npm version "$version" --no-git-tag-version --allow-same-version
+          test "$(node -p "require('./package.json').name")" = "codex-mobile"
+          test "$(node -p "require('./package.json').version")" = "$version"
+
+      - name: Test package
+        run: npm test
+
+      - name: Build frontend and gateway
+        run: npm run build:package
+
+      - name: Verify package contents
+        run: npm pack --dry-run
+
+      - name: Publish matching npm package
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

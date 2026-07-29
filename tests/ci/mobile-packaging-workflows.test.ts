@@ -25,6 +25,9 @@ interface Workflow {
       branches?: string[];
       paths?: string[];
     };
+    release?: {
+      types?: string[];
+    };
     workflow_dispatch?: unknown;
   };
   concurrency?: {
@@ -156,11 +159,13 @@ describe("移动 App 内置前端流水线", () => {
     expect(
       runAssetScanner(
         scanner,
-        'const docs = "https://react.dev/errors/"; const sample = "http://host.local:4173/?token=xxx"; const sentinel = "https://www.pakeplus.com/\0\b";',
+        'const docs = "https://react.dev/errors/"; const sample = "http://host.local:18766/?token=xxx"; const sentinel = "https://www.pakeplus.com/\0\b";',
       ).status,
     ).toBe(0);
     expect(hardenHost).toContain("app/src/main/assets/index.html");
     expect(hardenHost).toContain("allowed_permissions");
+    expect(source).toContain(".phone.camera = true");
+    expect(hardenHost).toContain("android.permission.CAMERA");
     expect(hardenHost).toContain('android:allowBackup="false"');
     expect(hardenHost).toContain("enableEdgeToEdge()");
     expect(hardenHost).toContain(
@@ -306,20 +311,7 @@ describe("移动 App 内置前端流水线", () => {
     );
     const scanner = readAssetScanner(workflow);
 
-    expect(workflow.on?.push?.branches).toEqual(["main"]);
-    expect(workflow.on?.push?.paths).toEqual(
-      expect.arrayContaining([
-        "src/**",
-        "public/**",
-        "index.html",
-        "package.json",
-        "package-lock.json",
-        "vite.config.ts",
-        "docs/assets/app-icon/codex-mobile-app-icon-1024.png",
-        "scripts/compose-mobile-app-icon.sh",
-        ".github/workflows/build-ios.yml",
-      ]),
-    );
+    expect(workflow.on?.release?.types).toContain("published");
     expect(workflow.on).toHaveProperty("workflow_dispatch");
     expect(workflow.concurrency).toMatchObject({
       "cancel-in-progress": true,
@@ -330,6 +322,11 @@ describe("移动 App 内置前端流水线", () => {
     expect(installIcon).toContain("readUInt32BE(16) !== 1024");
     expect(installIcon).toContain('cp "$icon" pakeplus/app-icon.png');
     expect(installIcon).toContain('cmp "$icon" pakeplus/app-icon.png');
+    expect(source).toContain(".phone.camera = true");
+    expect(source).toContain("NSCameraUsageDescription");
+    expect(source).toContain("Resolve app version");
+    expect(source).toContain("github.event.release.tag_name");
+    expect(source).not.toContain('APP_VERSION: "1.0.0"');
     expect(buildFrontend).toContain("npm ci");
     expect(buildFrontend).toContain("npm run build");
     expect(buildFrontend).toContain("cp -R dist/. pakeplus/scripts/www/");
