@@ -1,5 +1,6 @@
 import {
   type FormEvent,
+  useCallback,
   useEffect,
   useState,
 } from "react";
@@ -21,6 +22,7 @@ import type {
   BackendRuntimeSummary,
 } from "../../backends/types";
 import { ActionSheet } from "../../ui/ActionSheet";
+import { GatewayQrScannerSheet } from "./GatewayQrScannerSheet";
 
 interface BackendDraft {
   id: string;
@@ -48,6 +50,7 @@ export function BackendManagerSheet({
   onClose,
   appUpdate,
   probe = defaultProbeBackend,
+  scanQrCode,
 }: {
   open: boolean;
   registry: BackendRegistry;
@@ -62,22 +65,66 @@ export function BackendManagerSheet({
     onCheck: () => void;
   };
   probe?: (backend: BackendConfig) => Promise<GatewayHostInfo>;
+  scanQrCode?: () => Promise<string>;
 }) {
   const [draft, setDraft] = useState<BackendDraft | null>(() =>
     open && !registry.backends.length ? newBackendDraft(0) : null,
   );
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState("");
+  const [qrScannerOpen, setQrScannerOpen] = useState(false);
 
   useEffect(() => {
     if (!open) {
       setDraft(null);
       setError("");
       setTesting(false);
+      setQrScannerOpen(false);
     } else if (!registry.backends.length) {
       setDraft((current) => current ?? newBackendDraft(0));
     }
   }, [open, registry.backends.length]);
+
+  const applyScannedGateway = useCallback((value: string) => {
+    try {
+      const gateway = parseBackendGatewayUrl(value);
+      if (!gateway.token) throw new Error("二维码中缺少访问口令");
+      setDraft((current) =>
+        current
+          ? {
+              ...current,
+              gatewayUrl: formatBackendGatewayUrl(
+                gateway.baseUrl,
+                gateway.token,
+              ),
+            }
+          : current,
+      );
+      setError("");
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? `二维码无效：${reason.message}`
+          : "二维码不是有效的网关链接",
+      );
+    } finally {
+      setQrScannerOpen(false);
+    }
+  }, []);
+
+  const openQrScanner = async () => {
+    if (!scanQrCode) {
+      setQrScannerOpen(true);
+      return;
+    }
+    try {
+      applyScannedGateway(await scanQrCode());
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "未能识别二维码",
+      );
+    }
+  };
 
   if (!open) return null;
 
@@ -136,7 +183,8 @@ export function BackendManagerSheet({
   };
 
   return (
-    <ActionSheet
+    <>
+      <ActionSheet
       title={draft ? "设备连接" : "管理设备"}
       onClose={onClose}
       closeLabel="关闭"
@@ -157,18 +205,31 @@ export function BackendManagerSheet({
                 }
               />
             </label>
-            <label>
-              <span>网关地址</span>
-              <input
-                aria-label="网关地址"
-                inputMode="url"
-                value={draft.gatewayUrl}
-                placeholder="http://host.local:4173/?token=xxx"
-                onChange={(event) =>
-                  setDraft({ ...draft, gatewayUrl: event.target.value })
-                }
-              />
-            </label>
+            <div className="backend-form-field">
+              <label htmlFor="backend-gateway-url">网关地址</label>
+              <div className="backend-gateway-input">
+                <input
+                  id="backend-gateway-url"
+                  aria-label="网关地址"
+                  inputMode="url"
+                  value={draft.gatewayUrl}
+                  placeholder="http://host.local:18766/?token=xxx"
+                  onChange={(event) =>
+                    setDraft({ ...draft, gatewayUrl: event.target.value })
+                  }
+                />
+                <button
+                  type="button"
+                  aria-label="扫描网关二维码"
+                  onClick={() => void openQrScanner()}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" />
+                    <path d="M8 8h3v3H8zM14 8h2M14 11h2M8 14h2M13 14h3v3h-3z" />
+                  </svg>
+                </button>
+              </div>
+            </div>
             {error && <p className="backend-form-error" role="alert">{error}</p>}
             <div className="backend-form-actions">
               <button
@@ -314,6 +375,12 @@ export function BackendManagerSheet({
             )}
           </>
         )}
-    </ActionSheet>
+      </ActionSheet>
+      <GatewayQrScannerSheet
+        open={qrScannerOpen}
+        onScan={applyScannedGateway}
+        onClose={() => setQrScannerOpen(false)}
+      />
+    </>
   );
 }

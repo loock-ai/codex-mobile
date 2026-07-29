@@ -149,6 +149,53 @@ CODEX_MOBILE_SERVE_STATIC=false npm start
 - npm。
 - 可用的 `codex` CLI；Managed 模式需要其支持 `codex app-server`。
 
+### 通过 npm 命令安装
+
+全局安装并启动：
+
+```bash
+npm install -g codex-mobile
+codex-mobile start
+```
+
+启动成功后，直接输出当前机器可供局域网访问的带口令链接和终端二维码：
+
+```bash
+codex-mobile auth
+```
+
+`auth` 会读取最近一次 `start` 成功保存的实际端口和访问口令；纯文本脚本可使用
+`codex-mobile auth --plain`。运行信息保存在 `~/.codex-mobile/runtime.json`，
+文件权限为 `0600`。
+
+默认只允许本机访问，地址为 `http://127.0.0.1:18766`。允许手机通过局域网访问时：
+
+```bash
+HOST=0.0.0.0 \
+CODEX_MOBILE_TOKEN='<随机口令>' \
+codex-mobile start
+```
+
+临时指定其他网关端口：
+
+```bash
+codex-mobile start --port 19000
+```
+
+手机打开：
+
+```text
+http://<电脑局域网IP>:18766/?token=<随机口令>
+```
+
+查看命令帮助：
+
+```bash
+codex-mobile --help
+```
+
+### 从源码运行
+
 安装、构建并启动：
 
 ```bash
@@ -157,9 +204,9 @@ npm run build
 npm start
 ```
 
-默认地址为 `http://127.0.0.1:4173`。
+默认地址为 `http://127.0.0.1:18766`。
 
-允许局域网访问时，服务监听 `0.0.0.0:4173`，并且必须配置访问口令：
+允许局域网访问时，服务监听 `0.0.0.0:18766`，并且必须配置访问口令：
 
 ```bash
 HOST=0.0.0.0 \
@@ -170,7 +217,7 @@ npm start
 手机打开：
 
 ```text
-http://<Mac局域网IP>:4173/?token=<随机口令>
+http://<Mac局域网IP>:18766/?token=<随机口令>
 ```
 
 首次携带正确 Token 访问后，网关会写入 HttpOnly Cookie。Token 是轻量局域网保护；
@@ -181,7 +228,7 @@ http://<Mac局域网IP>:4173/?token=<随机口令>
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `HOST` | `127.0.0.1` | 网关监听地址；局域网访问使用 `0.0.0.0` |
-| `PORT` | `4173` | 网关端口 |
+| `PORT` | `18766` | 网关端口 |
 | `CODEX_MOBILE_TOKEN` | 空 | 网关访问口令；非回环监听时必填 |
 | `CODEX_APP_SERVER_MODE` | `managed` | `managed` 或 `external` |
 | `CODEX_APP_SERVER_PORT` | `18765` | Managed app-server 回环端口 |
@@ -202,7 +249,7 @@ gateway-only 后端。准备
 
 ```bash
 export HOST='0.0.0.0'
-export PORT='4173'
+export PORT='18766'
 export CODEX_APP_SERVER_MODE='managed'
 export CODEX_APP_SERVER_PORT='18765'
 export CODEX_MOBILE_HOST_ID='macbook-pro'
@@ -220,14 +267,14 @@ npm run dev
 该命令同时运行：
 
 - Vite：`http://0.0.0.0:5173`，提供前端和 HMR。
-- 网关：`http://0.0.0.0:4173`。
+- 网关：`http://0.0.0.0:18766`。
 - Managed app-server：`ws://127.0.0.1:18765`。
 
 其他机器使用独立的 `CODEX_MOBILE_HOST_ID`、名称和 Token。手机打开 Vite 页面后，
 在设备管理界面输入另一台机器的完整网关地址：
 
 ```text
-http://<设备局域网地址>:4173/?token=<该设备口令>
+http://<设备局域网地址>:18766/?token=<该设备口令>
 ```
 
 客户端会检查 `/api/host` 并完成一次 WebSocket `initialize`，验证成功后保存设备。

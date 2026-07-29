@@ -1,14 +1,47 @@
 {
-  "name": "codex-web-mobile",
+  "name": "codex-mobile",
   "version": "0.2.0",
-  "private": true,
+  "description": "Mobile-first web client and gateway for Codex app-server",
   "license": "Apache-2.0",
   "type": "module",
+  "bin": {
+    "codex-mobile": "bin/codex-mobile.mjs"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "npm-dist/server",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/loock-ai/codex-mobile.git"
+  },
+  "homepage": "https://github.com/loock-ai/codex-mobile#readme",
+  "bugs": {
+    "url": "https://github.com/loock-ai/codex-mobile/issues"
+  },
+  "keywords": [
+    "codex",
+    "mobile",
+    "app-server",
+    "gateway"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "zsh -lc 'source \"${CODEX_MOBILE_ENV_FILE:-$HOME/Library/Application Support/CodexMobileWeb/gateway.env}\" && exec npm exec -- concurrently --kill-others --success first --names gateway,vite \"npm:dev:gateway\" \"npm:dev:web\"'",
     "dev:gateway": "NODE_ENV=development CODEX_MOBILE_SERVE_STATIC=false tsx watch server/index.ts",
     "dev:web": "NODE_ENV=development vite --host 0.0.0.0 --port 5173 --strictPort",
     "build": "tsc -b && vite build",
+    "build:server": "tsc -p tsconfig.npm.json",
+    "build:package": "npm run build && npm run build:server",
+    "prepack": "npm run build:package",
     "start": "NODE_ENV=production tsx server/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -16,12 +49,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "^5.0.4",
-    "ajv": "^8.17.1",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1",
+    "qrcode": "^1.5.4",
     "ws": "^8.18.3"
   },
   "devDependencies": {
@@ -32,8 +60,15 @@
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^5.0.4",
+    "ajv": "^8.17.1",
     "concurrently": "^10.0.4",
     "jsdom": "^27.2.0",
+    "qr-scanner": "^1.4.2",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vite": "^7.2.2",

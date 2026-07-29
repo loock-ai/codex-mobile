@@ -1,5 +1,6 @@
 node_modules/
 dist/
+npm-dist/
 test-results/
 playwright-report/
 .DS_Store

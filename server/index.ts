@@ -9,6 +9,7 @@ import {
   startManagedAppServer,
 } from "./app-server-manager.js";
 import { readCodexProjectDirectories } from "./codex-projects.js";
+import { writeRuntimeAccess } from "./runtime-access.js";
 
 const runtime = resolveRuntimeConfig();
 const gatewayRuntime = resolveGatewayRuntimeConfig(
@@ -16,7 +17,7 @@ const gatewayRuntime = resolveGatewayRuntimeConfig(
   readHostname(),
 );
 const host = process.env.HOST ?? "127.0.0.1";
-const port = Number(process.env.PORT ?? "4173");
+const port = Number(process.env.PORT || "18766");
 assertGatewaySecurity(
   host,
   process.env.CODEX_MOBILE_TOKEN,
@@ -31,13 +32,16 @@ try {
     mode: runtime.mode,
     upstreamUrl: runtime.upstreamUrl,
     staticDir: gatewayRuntime.serveStatic
-      ? resolve(process.cwd(), "dist")
+      ? process.env.CODEX_MOBILE_STATIC_DIR || resolve(process.cwd(), "dist")
       : null,
     accessToken: process.env.CODEX_MOBILE_TOKEN,
     hostId: gatewayRuntime.hostId,
     displayName: gatewayRuntime.displayName,
     hostname: gatewayRuntime.hostname,
-    gatewayVersion: process.env.npm_package_version ?? "0.2.0",
+    gatewayVersion:
+      process.env.CODEX_MOBILE_VERSION ??
+      process.env.npm_package_version ??
+      "0.2.0",
     readProjectDirectories: () =>
       readCodexProjectDirectories(
         join(
@@ -65,6 +69,11 @@ try {
   await managed?.close();
   throw error;
 }
+
+await writeRuntimeAccess(process.env.CODEX_MOBILE_RUNTIME_FILE, {
+  port: gateway.port,
+  token: process.env.CODEX_MOBILE_TOKEN ?? "",
+});
 
 console.log(
   `Codex Mobile Web: http://${host === "0.0.0.0" ? "127.0.0.1" : host}:${gateway.port} (${runtime.mode})`,

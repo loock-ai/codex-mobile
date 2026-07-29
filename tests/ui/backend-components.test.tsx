@@ -165,6 +165,30 @@ describe("多设备界面", () => {
     );
   });
 
+  it("设备连接支持扫描二维码并填入完整网关链接", async () => {
+    const { unmount } = render(
+      <BackendManagerSheet
+        open
+        registry={{ version: 1, selectedBackendId: "", backends: [] }}
+        summaries={{}}
+        onChange={() => undefined}
+        onClose={() => undefined}
+        scanQrCode={async () =>
+          "http://192.168.100.8:4173/?token=scanned-token"
+        }
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "扫描网关二维码" }));
+
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("网关地址") as HTMLInputElement).value,
+      ).toBe("http://192.168.100.8:4173/?token=scanned-token"),
+    );
+    unmount();
+  });
+
   it("设备管理不会因误触遮罩关闭", () => {
     const onClose = vi.fn();
     const { container } = render(
