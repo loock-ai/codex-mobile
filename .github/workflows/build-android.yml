@@ -12,6 +12,8 @@ on:
       - "package-lock.json"
       - "tsconfig*.json"
       - "vite.config.ts"
+      - "docs/assets/app-icon/codex-mobile-app-icon-1024.png"
+      - "scripts/compose-mobile-app-icon.sh"
       - ".github/workflows/build-android.yml"
   workflow_dispatch:
 
@@ -91,6 +93,26 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: 10
+
+      - name: Install Codex Mobile app icon
+        shell: bash
+        run: |
+          set -euo pipefail
+          icon="docs/assets/app-icon/codex-mobile-app-icon-1024.png"
+          test -s "$icon"
+          node - "$icon" <<'NODE'
+          const fs = require("node:fs");
+          const icon = fs.readFileSync(process.argv[2]);
+          const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+          if (!icon.subarray(0, 8).equals(png)) {
+            throw new Error("App icon is not a PNG");
+          }
+          if (icon.readUInt32BE(16) !== 1024 || icon.readUInt32BE(20) !== 1024) {
+            throw new Error("App icon must be 1024x1024");
+          }
+          NODE
+          cp "$icon" pakeplus/app-icon.png
+          cmp "$icon" pakeplus/app-icon.png
 
       - name: Build embedded frontend
         shell: bash

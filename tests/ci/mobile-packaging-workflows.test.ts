@@ -99,6 +99,10 @@ describe("移动 App 内置前端流水线", () => {
     const { source, workflow } = readWorkflow(
       ".github/workflows/build-android.yml",
     );
+    const installIcon = readRunStep(
+      workflow,
+      "Install Codex Mobile app icon",
+    );
     const buildFrontend = readRunStep(workflow, "Build embedded frontend");
     const hardenHost = readRunStep(
       workflow,
@@ -107,6 +111,12 @@ describe("移动 App 内置前端流水线", () => {
     const verifyArtifact = readRunStep(workflow, "Prepare and verify APK");
     const scanner = readAssetScanner(workflow);
 
+    expect(installIcon).toContain(
+      "docs/assets/app-icon/codex-mobile-app-icon-1024.png",
+    );
+    expect(installIcon).toContain("readUInt32BE(16) !== 1024");
+    expect(installIcon).toContain('cp "$icon" pakeplus/app-icon.png');
+    expect(installIcon).toContain('cmp "$icon" pakeplus/app-icon.png');
     expect(buildFrontend).toContain("npm ci");
     expect(buildFrontend).toContain("npm run build");
     expect(buildFrontend).toContain("cp -R dist/. pakeplus/scripts/www/");
@@ -192,6 +202,8 @@ describe("移动 App 内置前端流水线", () => {
         "package.json",
         "package-lock.json",
         "vite.config.ts",
+        "docs/assets/app-icon/codex-mobile-app-icon-1024.png",
+        "scripts/compose-mobile-app-icon.sh",
         ".github/workflows/build-android.yml",
       ]),
     );
@@ -268,6 +280,10 @@ describe("移动 App 内置前端流水线", () => {
 
   it("iOS 只构建一个内置同一份前端的 Codex Mobile App", () => {
     const { source, workflow } = readWorkflow(".github/workflows/build-ios.yml");
+    const installIcon = readRunStep(
+      workflow,
+      "Install Codex Mobile app icon",
+    );
     const buildFrontend = readRunStep(workflow, "Build embedded frontend");
     const hardenHost = readRunStep(workflow, "Harden and test the iOS host");
     const verifyArtifact = readRunStep(
@@ -276,6 +292,12 @@ describe("移动 App 内置前端流水线", () => {
     );
     const scanner = readAssetScanner(workflow);
 
+    expect(installIcon).toContain(
+      "docs/assets/app-icon/codex-mobile-app-icon-1024.png",
+    );
+    expect(installIcon).toContain("readUInt32BE(16) !== 1024");
+    expect(installIcon).toContain('cp "$icon" pakeplus/app-icon.png');
+    expect(installIcon).toContain('cmp "$icon" pakeplus/app-icon.png');
     expect(buildFrontend).toContain("npm ci");
     expect(buildFrontend).toContain("npm run build");
     expect(buildFrontend).toContain("cp -R dist/. pakeplus/scripts/www/");
