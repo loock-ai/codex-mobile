@@ -49,9 +49,9 @@ const summaries: Record<string, BackendRuntimeSummary> = {
 };
 
 describe("多设备界面", () => {
-  it("设备切换器展示连接、运行和审批状态", () => {
+  it("设备切换器只展示连接、加载和审批状态，不汇总会话运行状态", () => {
     const onSelect = vi.fn();
-    render(
+    const { container } = render(
       <BackendSwitcher
         backends={[mini, macbook]}
         summaries={summaries}
@@ -65,10 +65,17 @@ describe("多设备界面", () => {
       screen.queryByRole("button", { name: "添加或管理设备" }),
     ).toBeNull();
     const selectedMachine = screen.getByRole("button", {
-      name: /Mac mini.*进行中/,
+      name: /Mac mini/,
     });
     expect(selectedMachine.getAttribute("aria-pressed")).toBe("true");
     expect(selectedMachine.textContent).not.toContain("▰");
+    expect(selectedMachine.getAttribute("aria-label")).not.toContain("进行中");
+    expect(
+      screen.getByRole("button", { name: /全部设备/ }).getAttribute(
+        "aria-label",
+      ),
+    ).not.toContain("进行中任务");
+    expect(container.querySelector(".backend-busy")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /MacBook.*2 个待审批/ }));
     expect(onSelect).toHaveBeenCalledWith("macbook");
   });

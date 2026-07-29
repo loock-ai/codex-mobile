@@ -47,10 +47,10 @@ describe("侧边栏刷新视觉", () => {
     expect(rule).toContain("--spinner-head: #111");
   });
 
-  it("机器、会话与项目 Loading 共用渐变头尾模式", () => {
+  it("机器列表加载、会话与项目 Loading 共用渐变头尾模式", () => {
     const sharedRule =
       styles.match(
-        /(?:^|\n)\.backend-loading, \.project-more \.action-spinner, \.backend-busy, \.running-spinner, \.sidebar-refresh-spinner\s*\{([^}]*)\}/,
+        /(?:^|\n)\.backend-loading, \.project-more \.action-spinner, \.running-spinner, \.sidebar-refresh-spinner\s*\{([^}]*)\}/,
       )?.[1] ?? "";
 
     expect(sharedRule).toContain("background: conic-gradient(");
