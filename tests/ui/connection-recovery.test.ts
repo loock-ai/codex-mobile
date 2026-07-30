@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   bindConnectionRecovery,
+  reconnectAndWaitUntilReady,
   recoverBackendConnection,
 } from "../../src/backends/connection-recovery";
 
@@ -79,15 +80,17 @@ describe("App 前后台连接恢复", () => {
     expect(reconnect).not.toHaveBeenCalled();
   });
 
-  it("健康连接通过探测时不会重连", async () => {
+  it("健康连接通过探测时增量对账当前会话且不会重连", async () => {
     const client = {
       request: vi.fn(async () => ({ rateLimits: {} })),
     };
     const reconnect = vi.fn();
+    const reconcile = vi.fn(async () => undefined);
 
     await recoverBackendConnection(
       client as never,
       reconnect,
+      reconcile,
     );
 
     expect(client.request).toHaveBeenCalledWith(
@@ -96,6 +99,7 @@ describe("App 前后台连接恢复", () => {
       { timeoutMs: 2_500 },
     );
     expect(reconnect).not.toHaveBeenCalled();
+    expect(reconcile).toHaveBeenCalledWith(client);
   });
 
   it("探测失败或当前没有客户端时立即重连", async () => {
@@ -110,5 +114,39 @@ describe("App 前后台连接恢复", () => {
     await recoverBackendConnection(null, reconnect);
 
     expect(reconnect).toHaveBeenCalledTimes(2);
+  });
+
+  it("健康探测成功但增量对账失败时不拆掉连接", async () => {
+    const client = {
+      request: vi.fn(async () => ({ data: [] })),
+    };
+    const reconnect = vi.fn();
+
+    await recoverBackendConnection(
+      client as never,
+      reconnect,
+      async () => {
+        throw new Error("snapshot failed");
+      },
+    );
+
+    expect(reconnect).not.toHaveBeenCalled();
+  });
+
+  it("重连任务保持进行中直到新客户端初始化完成", async () => {
+    let ready = false;
+    const reconnect = vi.fn();
+    const wait = vi.fn(async () => {
+      ready = true;
+    });
+
+    await reconnectAndWaitUntilReady(
+      reconnect,
+      () => ready,
+      wait,
+    );
+
+    expect(reconnect).toHaveBeenCalledOnce();
+    expect(wait).toHaveBeenCalledOnce();
   });
 });

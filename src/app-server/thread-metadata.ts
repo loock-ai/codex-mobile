@@ -6,27 +6,12 @@ export async function setThreadPinned(
   threadId: string,
   isPinned: boolean,
 ) {
-  const result = await Promise.race([
-    client.request<{ thread: DisplayRecord }>(
-      "thread/metadata/update",
-      { threadId, isPinned },
-    ),
-    new Promise<never>((_, reject) => {
-      globalThis.setTimeout(
-        () =>
-          reject(
-            new Error(
-              "当前 Codex CLI 不支持持久化置顶，请升级到支持 isPinned 的版本后重试",
-            ),
-          ),
-        1200,
-      );
-    }),
-  ]);
+  const result = await client.request<{ thread: DisplayRecord }>(
+    "thread/metadata/update",
+    { threadId, isPinned },
+  );
   if (result.thread?.isPinned !== isPinned) {
-    throw new Error(
-      "当前 Codex CLI 不支持持久化置顶，请升级到支持 isPinned 的版本后重试",
-    );
+    throw new Error("服务端返回的置顶状态不一致");
   }
   return result.thread;
 }

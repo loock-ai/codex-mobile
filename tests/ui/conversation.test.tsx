@@ -17,6 +17,7 @@ import {
   applyTurnItem,
   applyTurnStarted,
   automationAgentMessageText,
+  createPendingTurn,
   MarkdownMessage,
   groupConversationTurns,
   groupTimelineEntries,
@@ -26,6 +27,7 @@ import {
   parseAutomationHeartbeat,
   parseRemoteFileHref,
   relativeTime,
+  reconcileRecentTurns,
   removePendingTurn,
   parseUnifiedDiff,
   shouldCollapseUserMessage,
@@ -1141,6 +1143,250 @@ describe("移动端对话格式", () => {
       status: "inProgress",
       items: [{ id: "local-1", type: "userMessage", text: "新问题" }],
     });
+  });
+
+  it("乐观 pending 回合不使用手机本地时间", () => {
+    expect(
+      createPendingTurn("pending-1", {
+        id: "local-1",
+        type: "userMessage",
+        text: "新问题",
+      }),
+    ).toEqual({
+      id: "pending-1",
+      status: "inProgress",
+      items: [{ id: "local-1", type: "userMessage", text: "新问题" }],
+    });
+  });
+
+  it("增量对账按 turn 和 item id 补齐后台期间漏掉的内容", () => {
+    const current = [
+      {
+        id: "turn-1",
+        status: "completed",
+        startedAt: 100,
+        completedAt: 110,
+        items: [{ id: "a1", type: "agentMessage", text: "旧回复" }],
+      },
+      {
+        id: "pending-2",
+        status: "inProgress",
+        items: [{ id: "local-2", type: "userMessage", text: "继续" }],
+      },
+    ];
+    const latest = [
+      current[0],
+      {
+        id: "turn-2",
+        status: "completed",
+        startedAt: 120,
+        completedAt: 150,
+        durationMs: 30_000,
+        items: [
+          { id: "u2", type: "userMessage", text: "继续" },
+          { id: "a2", type: "agentMessage", text: "后台完成的回复" },
+        ],
+      },
+    ];
+
+    expect(reconcileRecentTurns(current, latest)).toEqual([
+      current[0],
+      {
+        id: "turn-2",
+        status: "completed",
+        startedAt: 120,
+        completedAt: 150,
+        durationMs: 30_000,
+        items: [
+          { id: "u2", type: "userMessage", text: "继续" },
+          { id: "a2", type: "agentMessage", text: "后台完成的回复" },
+        ],
+      },
+    ]);
+  });
+
+  it("增量对账不会用无关的历史 turn 替换本地 pending 回合", () => {
+    const pending = {
+      id: "pending-3",
+      status: "inProgress",
+      items: [{ id: "local-3", type: "userMessage", text: "正在发送" }],
+    };
+
+    expect(
+      reconcileRecentTurns(
+        [pending],
+        [
+          {
+            id: "turn-history",
+            status: "completed",
+            items: [
+              { id: "u-history", type: "userMessage", text: "历史问题" },
+              { id: "a-history", type: "agentMessage", text: "历史回复" },
+            ],
+          },
+        ],
+      ),
+    ).toEqual([
+      {
+        id: "turn-history",
+        status: "completed",
+        items: [
+          { id: "u-history", type: "userMessage", text: "历史问题" },
+          { id: "a-history", type: "agentMessage", text: "历史回复" },
+        ],
+      },
+      pending,
+    ]);
+  });
+
+  it("增量对账使用服务端完整窗口纠正 turn 和 item 顺序", () => {
+    expect(
+      reconcileRecentTurns(
+        [
+          {
+            id: "turn-2",
+            status: "inProgress",
+            items: [
+              { id: "a2", type: "agentMessage", text: "不完整" },
+              { id: "u2", type: "userMessage", text: "问题" },
+            ],
+          },
+          {
+            id: "turn-1",
+            status: "completed",
+            items: [],
+          },
+        ],
+        [
+          {
+            id: "turn-1",
+            status: "completed",
+            items: [{ id: "a1", type: "agentMessage", text: "上一轮" }],
+          },
+          {
+            id: "turn-2",
+            status: "completed",
+            items: [
+              { id: "u2", type: "userMessage", text: "问题" },
+              { id: "a2", type: "agentMessage", text: "完整回复" },
+            ],
+          },
+        ],
+      ),
+    ).toEqual([
+      {
+        id: "turn-1",
+        status: "completed",
+        items: [{ id: "a1", type: "agentMessage", text: "上一轮" }],
+      },
+      {
+        id: "turn-2",
+        status: "completed",
+        items: [
+          { id: "u2", type: "userMessage", text: "问题" },
+          { id: "a2", type: "agentMessage", text: "完整回复" },
+        ],
+      },
+    ]);
+  });
+
+  it("pending 匹配忽略服务端新增的 text_elements 字段", () => {
+    const pending = createPendingTurn("pending-4", {
+      id: "local-4",
+      type: "userMessage",
+      content: [{ type: "text", text: "继续" }],
+    });
+    expect(
+      reconcileRecentTurns(
+        [pending],
+        [
+          {
+            id: "turn-4",
+            status: "completed",
+            items: [
+              {
+                id: "u4",
+                type: "userMessage",
+                content: [
+                  { type: "text", text: "继续", text_elements: [] },
+                ],
+              },
+              { id: "a4", type: "agentMessage", text: "完成" },
+            ],
+          },
+        ],
+      ),
+    ).toEqual([
+      {
+        id: "turn-4",
+        status: "completed",
+        items: [
+          {
+            id: "u4",
+            type: "userMessage",
+            content: [{ type: "text", text: "继续", text_elements: [] }],
+          },
+          { id: "a4", type: "agentMessage", text: "完成" },
+        ],
+      },
+    ]);
+  });
+
+  it("图片消息 pending 优先按文字匹配，不受图片地址转换影响", () => {
+    const pending = createPendingTurn(
+      "pending-image",
+      {
+        id: "local-image",
+        type: "userMessage",
+        content: [
+          { type: "text", text: "看看图片" },
+          { type: "image", url: "data:image/png;base64,local" },
+        ],
+      },
+      1,
+    );
+    const [turn] = reconcileRecentTurns(
+      [pending],
+      [
+        {
+          id: "turn-image",
+          status: "completed",
+          items: [
+            {
+              id: "u-image",
+              type: "userMessage",
+              content: [
+                { type: "text", text: "看看图片", text_elements: [] },
+                { type: "localImage", path: "/tmp/upload.png" },
+              ],
+            },
+          ],
+        },
+      ],
+      { discardPendingThrough: 1 },
+    );
+
+    expect(turn.id).toBe("turn-image");
+    expect(turn.clientSequence).toBeUndefined();
+  });
+
+  it("稳定快照清理恢复开始前的 stale pending 并保留后来发送的消息", () => {
+    const stale = createPendingTurn(
+      "pending-stale",
+      { id: "u-stale", type: "userMessage", text: "旧消息" },
+      1,
+    );
+    const fresh = createPendingTurn(
+      "pending-fresh",
+      { id: "u-fresh", type: "userMessage", text: "新消息" },
+      2,
+    );
+
+    expect(
+      reconcileRecentTurns([stale, fresh], [], {
+        discardPendingThrough: 1,
+      }),
+    ).toEqual([fresh]);
   });
 
   it("turn/start 失败时只删除对应的乐观 pending 回合", () => {

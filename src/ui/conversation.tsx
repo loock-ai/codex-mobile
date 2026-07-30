@@ -528,6 +528,172 @@ export function applyTurnStarted(
   };
 }
 
+export function createPendingTurn(
+  id: string,
+  userItem: ConversationRecord,
+  clientSequence?: number,
+): ConversationRecord {
+  return {
+    id,
+    status: "inProgress",
+    items: [userItem],
+    ...(clientSequence == null ? {} : { clientSequence }),
+  };
+}
+
+export function reconcileRecentTurns(
+  currentTurns: ConversationRecord[],
+  serverTurns: ConversationRecord[],
+  options: { discardPendingThrough?: number } = {},
+): ConversationRecord[] {
+  const pendingTurn = (turn: ConversationRecord) =>
+    String(turn.id ?? "").startsWith("pending-");
+  const userSignature = (turn: ConversationRecord) => {
+    const user = (turn.items ?? []).find(
+      (item: ConversationRecord) => item.type === "userMessage",
+    );
+    if (!user) return "";
+    const content = Array.isArray(user.content) ? user.content : [];
+    return content.length
+      ? content
+          .filter((part: ConversationRecord) => part.type === "text")
+          .map((part: ConversationRecord) => String(part.text ?? ""))
+          .join("\n")
+          .trim()
+      : String(user.text ?? "").trim();
+  };
+  const hasUserImage = (turn: ConversationRecord) => {
+    const user = (turn.items ?? []).find(
+      (item: ConversationRecord) => item.type === "userMessage",
+    );
+    return Array.isArray(user?.content)
+      ? user.content.some(
+          (part: ConversationRecord) =>
+            part.type === "image" || part.type === "localImage",
+        )
+      : false;
+  };
+  const keepUnmatchedPending = (turn: ConversationRecord) => {
+    if (!pendingTurn(turn)) return true;
+    if (options.discardPendingThrough == null) return true;
+    return Number(turn.clientSequence ?? 0) > options.discardPendingThrough;
+  };
+  const mergeItems = (
+    currentItems: ConversationRecord[],
+    incomingItems: ConversationRecord[],
+  ) => {
+    const used = new Set<number>();
+    const ordered = incomingItems.map((incoming) => {
+      let currentIndex = currentItems.findIndex(
+        (current, index) => !used.has(index) && current.id === incoming.id,
+      );
+      if (currentIndex < 0 && incoming.type === "userMessage") {
+        currentIndex = currentItems.findIndex(
+          (current, index) =>
+            !used.has(index) && current.type === "userMessage",
+        );
+      }
+      if (currentIndex < 0) return incoming;
+      used.add(currentIndex);
+      return { ...currentItems[currentIndex], ...incoming };
+    });
+    return [
+      ...ordered,
+      ...currentItems.filter((_, index) => !used.has(index)),
+    ];
+  };
+  const mergeTurn = (
+    current: ConversationRecord,
+    incoming: ConversationRecord,
+  ) => {
+    const merged: ConversationRecord = {
+      ...current,
+      ...incoming,
+      items: mergeItems(current.items ?? [], incoming.items ?? []),
+    };
+    delete merged.clientSequence;
+    return merged;
+  };
+
+  const matchedCurrentIndexes = new Set<number>();
+  const exactOverlapIndexes: number[] = [];
+  const reconciledWindow = serverTurns.map((incoming, serverIndex) => {
+    let index = currentTurns.findIndex(
+      (turn, currentIndex) =>
+        !matchedCurrentIndexes.has(currentIndex) && turn.id === incoming.id,
+    );
+    if (index >= 0) exactOverlapIndexes.push(index);
+    if (index < 0) {
+      const signature = userSignature(incoming);
+      if (signature) {
+        index = currentTurns.findIndex(
+          (turn, currentIndex) =>
+            !matchedCurrentIndexes.has(currentIndex) &&
+            pendingTurn(turn) &&
+            userSignature(turn) === signature,
+        );
+      }
+    }
+    if (index < 0 && serverIndex === serverTurns.length - 1) {
+      const unmatchedPending = currentTurns
+        .map((turn, currentIndex) => ({ turn, currentIndex }))
+        .filter(
+          ({ turn, currentIndex }) =>
+            !matchedCurrentIndexes.has(currentIndex) && pendingTurn(turn),
+        );
+      if (
+        unmatchedPending.length === 1 &&
+        !userSignature(incoming) &&
+        !userSignature(unmatchedPending[0].turn) &&
+        hasUserImage(incoming) &&
+        hasUserImage(unmatchedPending[0].turn) &&
+        (incoming.items ?? []).some(
+          (item: ConversationRecord) => item.type === "userMessage",
+        )
+      ) {
+        index = unmatchedPending[0].currentIndex;
+      }
+    }
+    if (index >= 0) {
+      matchedCurrentIndexes.add(index);
+      return mergeTurn(currentTurns[index], incoming);
+    }
+    return incoming;
+  });
+
+  if (exactOverlapIndexes.length) {
+    const firstOverlap = Math.min(...exactOverlapIndexes);
+    return [
+      ...currentTurns.filter(
+        (turn, index) =>
+          index < firstOverlap &&
+          !matchedCurrentIndexes.has(index) &&
+          keepUnmatchedPending(turn),
+      ),
+      ...reconciledWindow,
+      ...currentTurns.filter(
+        (turn, index) =>
+          index >= firstOverlap &&
+          !matchedCurrentIndexes.has(index) &&
+          keepUnmatchedPending(turn),
+      ),
+    ];
+  }
+  return [
+    ...currentTurns.filter(
+      (turn, index) =>
+        !pendingTurn(turn) && !matchedCurrentIndexes.has(index),
+    ),
+    ...reconciledWindow,
+    ...currentTurns.filter(
+      (turn, index) =>
+        pendingTurn(turn) &&
+        !matchedCurrentIndexes.has(index) &&
+        keepUnmatchedPending(turn),
+    ),
+  ];
+}
+
 export function applyTurnItem(
   thread: ConversationRecord,
   params: ConversationRecord,

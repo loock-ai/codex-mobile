@@ -66,6 +66,59 @@ export async function loadOlderThreadTurns(
   };
 }
 
+export async function loadRecentThreadTurns(
+  client: Requester,
+  threadId: string,
+): Promise<AnyRecord[]> {
+  const response = await client.request("thread/turns/list", {
+    threadId,
+    limit: initialTurnsLimit,
+    sortDirection: "desc",
+    itemsView: "full",
+  });
+  return chronologicalTurns(response.data);
+}
+
+export async function loadStableRecentThreadTurns(
+  client: Requester,
+  threadId: string,
+  readNotificationSequence: () => number,
+  maxAttempts = 3,
+): Promise<AnyRecord[] | null> {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const sequence = readNotificationSequence();
+    const turns = await loadRecentThreadTurns(client, threadId);
+    if (sequence === readNotificationSequence()) return turns;
+  }
+  return null;
+}
+
+export async function loadRecoverableRecentThreadTurns(
+  client: Requester,
+  threadId: string,
+  readNotificationSequence: () => number,
+  wait: (delayMs: number) => Promise<void> = (delayMs) =>
+    new Promise((resolve) => globalThis.setTimeout(resolve, delayMs)),
+  maxAttempts = 3,
+): Promise<AnyRecord[] | null> {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const turns = await loadStableRecentThreadTurns(
+        client,
+        threadId,
+        readNotificationSequence,
+      );
+      if (turns != null) return turns;
+    } catch {
+      // 快照读取失败不代表 WebSocket 已断开；先在当前连接上限次重试。
+    }
+    if (attempt < maxAttempts - 1) {
+      await wait(300 * 2 ** attempt);
+    }
+  }
+  return null;
+}
+
 export async function resumeThreadSession(
   client: Requester,
   threadId: string,

@@ -17,10 +17,13 @@ import {
   applyTurnDiff,
   applyTurnItem,
   applyTurnStarted,
+  createPendingTurn,
   isThreadRunning,
+  reconcileRecentTurns,
   removePendingTurn,
 } from "./ui/conversation";
 import {
+  loadRecoverableRecentThreadTurns,
   loadOlderThreadTurns,
   prependUniqueTurns,
   resumeThreadSession,
@@ -82,6 +85,7 @@ import {
 import { BackendConnectionManager } from "./backends/connection-manager";
 import {
   bindConnectionRecovery,
+  reconnectAndWaitUntilReady,
   recoverBackendConnection,
 } from "./backends/connection-recovery";
 import { fetchBackendHostInfo, fetchBackendProjects } from "./backends/probe";
@@ -227,18 +231,8 @@ function BackendWorkspace({
   const olderTurnsLoadingRef = useRef(false);
   const fullyLoadedProjectCwdsRef = useRef(new Set<string>());
   const refreshSequenceRef = useRef(0);
-  const localPinnedKey = `codex-mobile:pinned:${backend.id}`;
-  const readLocalPinned = () => {
-    try {
-      const value = JSON.parse(localStorage.getItem(localPinnedKey) || "[]");
-      return new Set(Array.isArray(value) ? value.map(String) : []);
-    } catch {
-      return new Set<string>();
-    }
-  };
-  const writeLocalPinned = (ids: Set<string>) => {
-    localStorage.setItem(localPinnedKey, JSON.stringify([...ids]));
-  };
+  const threadNotificationSequenceRef = useRef(0);
+  const pendingSequenceRef = useRef(0);
   const readLocalUnread = () =>
     readUnreadThreadIds(localStorage, backend.id);
   const writeLocalUnread = (ids: Set<string>) => {
@@ -273,11 +267,10 @@ function BackendWorkspace({
   > | null>(null);
   if (!threadListLoaderRef.current) {
     const decorateThreads = (data: AnyRecord[]): AnyRecord[] => {
-      const localPinned = readLocalPinned();
       const localUnread = readLocalUnread();
       return data.map((thread) => ({
         ...thread,
-        isPinned: thread.isPinned === true || localPinned.has(String(thread.id)),
+        isPinned: thread.isPinned === true,
         isUnread: localUnread.has(String(thread.id)),
       }));
     };
@@ -358,6 +351,57 @@ function BackendWorkspace({
       );
       throw reason;
     }
+  }
+
+  async function reconcileActiveThread(client: AppServerClient) {
+    const threadId = String(
+      activeThreadTargetRef.current ?? activeRef.current?.id ?? "",
+    );
+    if (!threadId || client !== clientRef.current) return;
+    const discardPendingThrough = pendingSequenceRef.current;
+
+    const latestTurns = await loadRecoverableRecentThreadTurns(
+      client,
+      threadId,
+      () => threadNotificationSequenceRef.current,
+    );
+    if (
+      client !== clientRef.current ||
+      String(
+        activeThreadTargetRef.current ?? activeRef.current?.id ?? "",
+      ) !== threadId ||
+      activeRef.current?.id !== threadId ||
+      latestTurns == null
+    ) {
+      return;
+    }
+
+    const lastTurn = latestTurns.at(-1);
+    const running =
+      ["inProgress", "in_progress", "running"].includes(
+        String(lastTurn?.status ?? ""),
+      ) || pendingSequenceRef.current > discardPendingThrough;
+    setActive((current) =>
+      current?.id === threadId
+        ? {
+            ...current,
+            turns: reconcileRecentTurns(current.turns ?? [], latestTurns, {
+              discardPendingThrough,
+            }),
+          }
+        : current,
+    );
+    setBusy(running);
+    setThreads((entries) =>
+      entries.map((entry) =>
+        entry.id === threadId
+          ? {
+              ...entry,
+              status: { type: running ? "active" : "idle" },
+            }
+          : entry,
+      ),
+    );
   }
 
   useEffect(() => {
@@ -458,6 +502,13 @@ function BackendWorkspace({
       onNotification: (_backendId, message, source) => {
           const client = source as AppServerClient;
           const params = (message.params ?? {}) as AnyRecord;
+          if (
+            params.threadId &&
+            params.threadId ===
+              (activeThreadTargetRef.current ?? activeRef.current?.id)
+          ) {
+            threadNotificationSequenceRef.current += 1;
+          }
           if (message.method === "turn/started" && params.turn) {
             if (params.threadId) {
               setThreads((current) => {
@@ -761,12 +812,9 @@ function BackendWorkspace({
                   resumed.reasoningEffort,
                   resumed.serviceTier,
                 );
-                const localPinned = readLocalPinned();
                 setActive({
                   ...resumed.thread,
-                  isPinned:
-                    resumed.thread.isPinned === true ||
-                    localPinned.has(String(resumed.thread.id)),
+                  isPinned: resumed.thread.isPinned === true,
                 });
                 resetOlderTurns(resumed.nextTurnsCursor);
                 setConversationLoadState("ready");
@@ -815,7 +863,12 @@ function BackendWorkspace({
       reconnect: () =>
         recoverBackendConnection(
           clientRef.current,
-          () => manager.reconnect(backend.id),
+          () =>
+            reconnectAndWaitUntilReady(
+              () => manager.reconnect(backend.id),
+              () => disposed || clientRef.current != null,
+            ),
+          reconcileActiveThread,
         ),
     });
     return () => {
@@ -918,12 +971,9 @@ function BackendWorkspace({
         session.reasoningEffort,
         session.serviceTier,
       );
-      const localPinned = readLocalPinned();
       setActive({
         ...session.thread,
-        isPinned:
-          session.thread.isPinned === true ||
-          localPinned.has(String(session.thread.id)),
+        isPinned: session.thread.isPinned === true,
       });
       resetOlderTurns(session.nextTurnsCursor);
       setActiveSettingsSynchronized(session.settingsSynchronized);
@@ -1140,6 +1190,7 @@ function BackendWorkspace({
         type: "userMessage",
         content: buildOptimisticUserContent(text, pendingImages),
       };
+      const pendingSequence = ++pendingSequenceRef.current;
       if (draftContext === draftContextGenerationRef.current) {
         setActive((current) => {
           if (!current || current.id !== thread!.id) return current;
@@ -1148,10 +1199,11 @@ function BackendWorkspace({
             turns: [
               ...(current.turns ?? thread!.turns ?? []),
               {
-                id: pendingTurnId,
-                status: "inProgress",
-                startedAt: Math.floor(Date.now() / 1000),
-                items: [localItem],
+                ...createPendingTurn(
+                  pendingTurnId,
+                  localItem,
+                  pendingSequence,
+                ),
               },
             ],
           };
@@ -1259,24 +1311,12 @@ function BackendWorkspace({
     setPendingAction("pin");
     setError("");
     try {
-      // Apply locally first so pinning remains usable with older CLI versions
-      // that do not implement thread/metadata/update.
-      const localPinned = readLocalPinned();
-      if (nextPinned) localPinned.add(String(thread.id));
-      else localPinned.delete(String(thread.id));
-      writeLocalPinned(localPinned);
-      let refreshed: AnyRecord | null;
-      try {
-        refreshed = await setThreadPinned(client, thread.id, nextPinned);
-      } catch {
-        // Server persistence is best effort; the local state above is the
-        // source of truth when the connected CLI rejects or lacks the RPC.
-        refreshed = { ...thread, isPinned: nextPinned };
-      }
-      const persistedPinned =
-        typeof refreshed.isPinned === "boolean"
-          ? refreshed.isPinned
-          : nextPinned;
+      const refreshed = await setThreadPinned(
+        client,
+        thread.id,
+        nextPinned,
+      );
+      const persistedPinned = refreshed.isPinned;
       setThreads((current) =>
         current.map((entry) =>
           entry.id === thread.id
@@ -1291,14 +1331,8 @@ function BackendWorkspace({
       );
       showNotice(persistedPinned ? "已置顶" : "已取消置顶");
       return true;
-    } catch (reason) {
-      setError(
-        reason instanceof Error && reason.message.includes("不支持持久化置顶")
-          ? reason.message
-          : nextPinned
-            ? "置顶失败，请重试"
-            : "取消置顶失败，请重试",
-      );
+    } catch {
+      setError(nextPinned ? "置顶失败，请重试" : "取消置顶失败，请重试");
       return false;
     } finally {
       setPendingAction("");

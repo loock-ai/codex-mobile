@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  loadRecoverableRecentThreadTurns,
+  loadRecentThreadTurns,
+  loadStableRecentThreadTurns,
   loadOlderThreadTurns,
   prependUniqueTurns,
   resumeThreadSession,
@@ -91,6 +94,68 @@ describe("恢复已有 app-server 会话", () => {
       "turn-2",
     ]);
     expect(result.nextCursor).toBe("next-older");
+  });
+
+  it("获取最新完整 turns 用于回到前台后的增量对账", async () => {
+    const request = vi.fn().mockResolvedValue({
+      data: [
+        { id: "turn-3", status: "completed" },
+        { id: "turn-2", status: "completed" },
+      ],
+      nextCursor: "older",
+    });
+
+    const result = await loadRecentThreadTurns(
+      { request },
+      "thread-1",
+    );
+
+    expect(request).toHaveBeenCalledWith("thread/turns/list", {
+      threadId: "thread-1",
+      limit: 10,
+      sortDirection: "desc",
+      itemsView: "full",
+    });
+    expect(result.map((turn) => turn.id)).toEqual(["turn-2", "turn-3"]);
+  });
+
+  it("对账请求期间收到实时事件时重新读取稳定快照", async () => {
+    let notificationSequence = 0;
+    const request = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        notificationSequence += 1;
+        return { data: [{ id: "turn-stale" }] };
+      })
+      .mockResolvedValueOnce({ data: [{ id: "turn-current" }] });
+
+    const result = await loadStableRecentThreadTurns(
+      { request },
+      "thread-1",
+      () => notificationSequence,
+    );
+
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(result?.map((turn) => turn.id)).toEqual(["turn-current"]);
+  });
+
+  it("前台恢复快照短暂失败时按退避重试且不要求重连", async () => {
+    const request = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValueOnce({ data: [{ id: "turn-current" }] });
+    const wait = vi.fn().mockResolvedValue(undefined);
+
+    const result = await loadRecoverableRecentThreadTurns(
+      { request },
+      "thread-1",
+      () => 0,
+      wait,
+    );
+
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(wait).toHaveBeenCalledWith(300);
+    expect(result?.map((turn) => turn.id)).toEqual(["turn-current"]);
   });
 
   it("向前插入分页结果时按 id 去重且保留现有实时 turn", () => {

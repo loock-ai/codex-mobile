@@ -10,12 +10,27 @@ interface ConnectionRecoveryOptions {
   reconnect: () => void | Promise<void>;
 }
 
+export async function reconnectAndWaitUntilReady(
+  reconnect: () => void,
+  isReady: () => boolean,
+  wait: () => Promise<void> = () =>
+    new Promise((resolve) => globalThis.setTimeout(resolve, 100)),
+  maxChecks = 100,
+) {
+  reconnect();
+  for (let check = 0; check < maxChecks && !isReady(); check += 1) {
+    await wait();
+  }
+}
+
 export async function recoverBackendConnection(
   client: AppServerClient | null,
-  reconnect: () => void,
+  reconnect: () => void | Promise<void>,
+  reconcile: (client: AppServerClient) => void | Promise<void> = () =>
+    undefined,
 ) {
   if (!client) {
-    reconnect();
+    await reconnect();
     return;
   }
   try {
@@ -25,7 +40,14 @@ export async function recoverBackendConnection(
       { timeoutMs: 2_500 },
     );
   } catch {
-    reconnect();
+    await reconnect();
+    return;
+  }
+  try {
+    await reconcile(client);
+  } catch {
+    // A snapshot failure does not prove that the transport is unhealthy.
+    // Keep the live connection and let the next foreground/manual refresh retry.
   }
 }
 

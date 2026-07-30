@@ -18,14 +18,14 @@ describe("线程元数据", () => {
     });
   });
 
-  it("服务端没有返回目标置顶状态时报告能力不支持", async () => {
+  it("服务端没有返回目标置顶状态时报告响应异常", async () => {
     const request = vi.fn(async () => ({
       thread: { id: "thread-1" },
     }));
 
     await expect(
       setThreadPinned({ request } as any, "thread-1", true),
-    ).rejects.toThrow("不支持持久化置顶");
+    ).rejects.toThrow("置顶状态不一致");
   });
 
   it("旧归档响应不会清空后来打开的会话", () => {
