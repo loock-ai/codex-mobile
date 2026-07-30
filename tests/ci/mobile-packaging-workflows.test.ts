@@ -15,6 +15,7 @@ function readProjectFile(path: string) {
 }
 
 interface WorkflowStep {
+  if?: string;
   name?: string;
   run?: string;
 }
@@ -52,6 +53,7 @@ interface Workflow {
       steps: WorkflowStep[];
     };
     ios?: {
+      if?: string;
       needs?: string;
       uses?: string;
       with?: Record<string, string>;
@@ -286,7 +288,36 @@ describe("移动 App 内置前端流水线", () => {
     expect(resolveVersion).toContain("patch + 1");
     expect(resolveVersion).toContain("GITHUB_OUTPUT");
     expect(resolveVersion).toContain("GITHUB_ENV");
+    expect(resolveVersion).toContain(
+      'if [[ "$ENABLE_IOS_BUILD" == "false" ]]; then',
+    );
+    expect(resolveVersion).toContain("build_ios=false");
+    const buildIosResolver = resolveVersion.match(
+      /(build_ios=true\n[ \t]*if \[\[ "\$ENABLE_IOS_BUILD" == "false" \]\]; then\n[ \t]*build_ios=false\n[ \t]*fi)/,
+    )?.[1];
+    expect(buildIosResolver).toBeTypeOf("string");
+    for (const [configuredValue, expected] of [
+      ["false", "false"],
+      ["", "true"],
+      ["FALSE", "true"],
+      ["0", "true"],
+    ]) {
+      const result = spawnSync(
+        "bash",
+        ["-c", `${buildIosResolver}\nprintf '%s' "$build_ios"`],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            ENABLE_IOS_BUILD: configuredValue,
+          },
+        },
+      );
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe(expected);
+    }
     expect(workflow.jobs.version?.outputs).toHaveProperty("app_version");
+    expect(workflow.jobs.version?.outputs).toHaveProperty("build_ios");
     expect(workflow.jobs.version?.outputs).toHaveProperty("publish_npm");
     expect(workflow.jobs.build.needs).toBe("version");
     expect(workflow.jobs.build.env?.APP_VERSION).toContain(
@@ -298,6 +329,9 @@ describe("移动 App 内置前端流水线", () => {
     });
     expect(workflow.jobs.ios?.with?.app_version).toContain(
       "needs.version.outputs.app_version",
+    );
+    expect(workflow.jobs.ios?.if).toContain(
+      "needs.version.outputs.build_ios == 'true'",
     );
     expect(workflow.jobs.npm).toMatchObject({
       needs: "version",
@@ -333,8 +367,21 @@ describe("移动 App 内置前端流水线", () => {
       "ios",
     ]);
     expect(workflow.jobs.release?.if).not.toContain("needs.npm.result");
+    expect(workflow.jobs.release?.if).toContain("always()");
+    expect(workflow.jobs.release?.if).toContain(
+      "needs.version.outputs.build_ios == 'false'",
+    );
+    expect(workflow.jobs.release?.if).toContain(
+      "needs.ios.result == 'skipped'",
+    );
     expect(workflow.jobs.release?.permissions?.contents).toBe("write");
     expect(workflow.jobs.release?.if).toContain("github.event_name == 'push'");
+    const downloadIos = workflow.jobs.release?.steps.find(
+      (step) => step.name === "Download verified unsigned IPA",
+    );
+    expect(downloadIos?.if).toContain(
+      "needs.version.outputs.build_ios == 'true'",
+    );
     const publish = workflow.jobs.release?.steps.find(
       (step) => step.name === "Publish GitHub Release",
     )?.run;
@@ -346,6 +393,9 @@ describe("移动 App 内置前端流水线", () => {
     expect(publish).toContain("--cleanup-tag");
     expect(publish).toContain("CodexMobile-v");
     expect(publish).toContain("-unsigned.ipa");
+    expect(publish).toContain('if [[ "$IOS_BUILD_ENABLED" == "true" ]]');
+    expect(publish).toContain('release_assets=("$apk" "$apk_checksum")');
+    expect(publish).toContain('release_assets+=("$ipa" "$ipa_checksum")');
     expect(publish).toContain("sha256sum --check");
     expect(source).toContain("actions/download-artifact@v4");
   });

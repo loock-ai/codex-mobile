@@ -46,6 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       app_version: ${{ steps.version.outputs.app_version }}
+      build_ios: ${{ steps.version.outputs.build_ios }}
       release_tag: ${{ steps.version.outputs.release_tag }}
       publish_npm: ${{ steps.version.outputs.publish_npm }}
 
@@ -60,6 +61,7 @@ jobs:
         id: version
         shell: bash
         env:
+          ENABLE_IOS_BUILD: ${{ vars.ENABLE_IOS_BUILD }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -86,6 +88,11 @@ jobs:
           echo "APP_VERSION_CODE=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
           echo "app_version=$version" >> "$GITHUB_OUTPUT"
           echo "release_tag=v$version" >> "$GITHUB_OUTPUT"
+          build_ios=true
+          if [[ "$ENABLE_IOS_BUILD" == "false" ]]; then
+            build_ios=false
+          fi
+          echo "build_ios=$build_ios" >> "$GITHUB_OUTPUT"
           publish_npm=false
           if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
             base="${{ github.event.before }}"
@@ -1006,6 +1013,7 @@ jobs:
   ios:
     name: Build Codex Mobile iOS
     needs: version
+    if: needs.version.outputs.build_ios == 'true'
     uses: ./.github/workflows/build-ios.yml
     with:
       app_version: ${{ needs.version.outputs.app_version }}
@@ -1030,7 +1038,13 @@ jobs:
       github.ref == 'refs/heads/main' &&
       needs.version.result == 'success' &&
       needs.build.result == 'success' &&
-      needs.ios.result == 'success'
+      (
+        needs.ios.result == 'success' ||
+        (
+          needs.version.outputs.build_ios == 'false' &&
+          needs.ios.result == 'skipped'
+        )
+      )
     needs:
       - version
       - build
@@ -1046,6 +1060,7 @@ jobs:
           path: release
 
       - name: Download verified unsigned IPA
+        if: needs.version.outputs.build_ios == 'true'
         uses: actions/download-artifact@v4
         with:
           name: CodexMobile-ios-unsigned
@@ -1057,6 +1072,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           APP_VERSION: ${{ needs.version.outputs.app_version }}
           RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
+          IOS_BUILD_ENABLED: ${{ needs.version.outputs.build_ios }}
         run: |
           set -euo pipefail
           apk="release/CodexMobile-v${APP_VERSION}.apk"
@@ -1065,14 +1081,21 @@ jobs:
           ipa_checksum="${ipa}.sha256"
           test -s "$apk"
           test -s "$apk_checksum"
-          test -s "$ipa"
-          test -s "$ipa_checksum"
           (
             cd release
             sha256sum --check "CodexMobile-v${APP_VERSION}.apk.sha256"
-            sha256sum --check \
-              "CodexMobile-v${APP_VERSION}-unsigned.ipa.sha256"
           )
+          release_assets=("$apk" "$apk_checksum")
+          if [[ "$IOS_BUILD_ENABLED" == "true" ]]; then
+            test -s "$ipa"
+            test -s "$ipa_checksum"
+            (
+              cd release
+              sha256sum --check \
+                "CodexMobile-v${APP_VERSION}-unsigned.ipa.sha256"
+            )
+            release_assets+=("$ipa" "$ipa_checksum")
+          fi
           cleanup_draft() {
             gh release delete "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
@@ -1081,10 +1104,7 @@ jobs:
           }
           trap cleanup_draft ERR INT TERM
           gh release create "$RELEASE_TAG" \
-            "$apk" \
-            "$apk_checksum" \
-            "$ipa" \
-            "$ipa_checksum" \
+            "${release_assets[@]}" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "Codex Mobile $RELEASE_TAG" \
