@@ -119,6 +119,43 @@ describe("图片放大预览", () => {
     expect(screen.queryByText(/二进制文件/)).toBeNull();
   });
 
+  it("远程 Markdown 文件默认预览并允许切换源码", async () => {
+    const request = vi.fn().mockResolvedValue({
+      dataBase64: window.btoa("# Remote docs\n\n**Preview content**"),
+    });
+    render(
+      <RemoteFileLink
+        href="/tmp/project/README.md:3"
+        client={{ request } as any}
+      >
+        README.md
+      </RemoteFileLink>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "README.md" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Remote docs" }),
+    ).not.toBeNull();
+    expect(screen.getByText("Preview content").tagName).toBe("STRONG");
+    expect(
+      screen.getByRole("button", { name: "预览 Markdown" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(screen.queryByText("1")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "查看源码" }));
+
+    expect(screen.getByText("# Remote docs")).not.toBeNull();
+    expect(
+      document.querySelector(".remote-text-line.target"),
+    ).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: "查看源码" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+
   it("用户和 AI Markdown 图片都使用可点击预览入口", async () => {
     render(
       <TurnCard

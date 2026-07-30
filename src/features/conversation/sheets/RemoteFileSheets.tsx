@@ -7,6 +7,7 @@ import {
 import { createPortal } from "react-dom";
 import { AppServerClient } from "../../../app-server/client";
 import {
+  MarkdownMessage,
   parseRemoteFileHref,
   type ImageSource,
 } from "../../../ui/conversation";
@@ -31,6 +32,34 @@ function imageMime(source: string) {
 
 function isPreviewableImagePath(source: string) {
   return /\.(?:avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/i.test(source);
+}
+
+function isMarkdownPath(source: string) {
+  return /\.(?:md|markdown)$/i.test(source);
+}
+
+function remoteMarkdownImage(path: string, source: string): ImageSource {
+  if (/^(?:data:|https?:)/i.test(source)) {
+    return {
+      source,
+      name: source.split(/[?#]/)[0]?.split("/").at(-1) || "图片",
+      local: false,
+    };
+  }
+  const directory = path.slice(0, path.lastIndexOf("/") + 1);
+  let resolved = source.startsWith("/") ? source : `${directory}${source}`;
+  try {
+    resolved = decodeURIComponent(
+      new URL(resolved, "file:///").pathname,
+    );
+  } catch {
+    // 保留原路径，由 app-server 返回具体读取错误。
+  }
+  return {
+    source: resolved,
+    name: resolved.split("/").at(-1) || "图片",
+    local: true,
+  };
 }
 
 function formatImageSize(bytes: number | null) {
@@ -165,9 +194,14 @@ function RemoteTextFileSheet({
   });
   const targetLineRef = useRef<HTMLDivElement | null>(null);
   const name = path.split("/").filter(Boolean).at(-1) || "远程文件";
+  const markdown = isMarkdownPath(path);
+  const [viewMode, setViewMode] = useState<"preview" | "source">(
+    markdown ? "preview" : "source",
+  );
 
   useEffect(() => {
     let cancelled = false;
+    setViewMode(isMarkdownPath(path) ? "preview" : "source");
     setState({
       status: "loading",
       text: "",
@@ -225,9 +259,13 @@ function RemoteTextFileSheet({
   }, [client, path]);
 
   useEffect(() => {
-    if (state.status !== "ready" || line == null) return;
-    targetLineRef.current?.scrollIntoView({ block: "center" });
-  }, [line, state.status]);
+    if (
+      state.status !== "ready" ||
+      line == null ||
+      viewMode !== "source"
+    ) return;
+    targetLineRef.current?.scrollIntoView?.({ block: "center" });
+  }, [line, state.status, viewMode]);
 
   const lines = state.text.split("\n");
   if (lines.at(-1) === "") lines.pop();
@@ -269,9 +307,35 @@ function RemoteTextFileSheet({
       }
       footer={<p className="remote-file-path">{href}</p>}
     >
-        <div className="remote-text-file-name">
-          <strong>{name}</strong>
-          {state.bytes != null ? ` (${formatImageSize(state.bytes)})` : ""}
+        <div className="remote-text-file-header">
+          <div className="remote-text-file-name">
+            <strong>{name}</strong>
+            {state.bytes != null ? ` (${formatImageSize(state.bytes)})` : ""}
+          </div>
+          {markdown && state.status === "ready" && !state.binary && (
+            <div
+              className="remote-markdown-mode"
+              role="group"
+              aria-label="Markdown 显示模式"
+            >
+              <button
+                type="button"
+                aria-label="预览 Markdown"
+                aria-pressed={viewMode === "preview"}
+                onClick={() => setViewMode("preview")}
+              >
+                预览
+              </button>
+              <button
+                type="button"
+                aria-label="查看源码"
+                aria-pressed={viewMode === "source"}
+                onClick={() => setViewMode("source")}
+              >
+                源码
+              </button>
+            </div>
+          )}
         </div>
         <div className="remote-text-content">
           {state.status === "loading" && (
@@ -294,6 +358,24 @@ function RemoteTextFileSheet({
           )}
           {state.status === "ready" &&
             !state.binary &&
+            markdown &&
+            viewMode === "preview" &&
+            lines.length > 0 && (
+              <MarkdownMessage
+                text={state.text}
+                className="remote-markdown-preview"
+                renderImage={(source, alt) => (
+                  <RemoteImage
+                    image={remoteMarkdownImage(path, source)}
+                    client={client}
+                    alt={alt}
+                  />
+                )}
+              />
+            )}
+          {state.status === "ready" &&
+            !state.binary &&
+            (!markdown || viewMode === "source") &&
             lines.map((content, index) => {
               const lineNumber = index + 1;
               const target = lineNumber === line;

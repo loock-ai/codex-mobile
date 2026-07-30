@@ -311,8 +311,19 @@ button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; 
 @media (prefers-reduced-motion: reduce) { .image-preview-stage img { transition: none; } }
 .remote-text-sheet { max-height: 84dvh; }
 .remote-text-sheet .action-sheet-body { overflow: hidden; padding: 0; display: flex; flex-direction: column; }
-.remote-text-file-name { flex: 0 0 auto; padding: 0 20px 9px; overflow: hidden; color: #555; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.remote-text-file-header { flex: 0 0 auto; min-width: 0; padding: 0 20px 9px; display: flex; align-items: center; gap: 12px; }
+.remote-text-file-name { min-width: 0; flex: 1 1 auto; overflow: hidden; color: #555; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.remote-markdown-mode { flex: 0 0 auto; border-radius: 17px; background: #ededed; padding: 2px; display: flex; align-items: center; }
+.remote-markdown-mode button { min-width: 48px; height: 30px; border: 0; border-radius: 15px; background: transparent; color: #777; padding: 0 11px; font-size: 12px; font-weight: 650; }
+.remote-markdown-mode button[aria-pressed="true"] { background: #fff; color: #111; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
 .remote-text-content { min-height: 160px; max-height: 55dvh; overflow: auto; overscroll-behavior: contain; border-block: 1px solid #ededed; background: #fbfbfb; -webkit-overflow-scrolling: touch; }
+.remote-markdown-preview { max-width: 720px; margin: 0 auto; padding: 22px 24px 32px; color: #222; font-size: 14px; line-height: 1.68; overflow-wrap: anywhere; }
+.remote-markdown-preview h1 { padding-bottom: 9px; border-bottom: 1px solid #e5e5e5; font-size: 1.7em; }
+.remote-markdown-preview h2 { padding-bottom: 7px; border-bottom: 1px solid #ececec; font-size: 1.35em; }
+.remote-markdown-preview h3 { font-size: 1.15em; }
+.remote-markdown-preview h1, .remote-markdown-preview h2, .remote-markdown-preview h3 { margin: 1.35em 0 .65em; line-height: 1.28; }
+.remote-markdown-preview > :first-child { margin-top: 0; }
+.remote-markdown-preview img { border-radius: 12px; }
 .remote-text-line { min-width: max-content; display: grid; grid-template-columns: 48px minmax(max-content,1fr); font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .remote-text-line > span { padding: 2px 9px; border-right: 1px solid #ececec; color: #999; text-align: right; user-select: none; }
 .remote-text-line code { min-width: max-content; padding: 2px 12px; white-space: pre; font: inherit; }
