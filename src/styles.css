@@ -12,11 +12,11 @@ button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; 
 .chevron-icon.direction-up { transform: rotate(-90deg); }
 .chevron-icon.direction-left { transform: rotate(180deg); }
 .app-shell { width: min(100%, 720px); max-width: 100%; margin: 0 auto; min-height: 100dvh; background: #fff; }
-.conversation-sidebar-layer { position: fixed; inset-block: 0; left: 50%; z-index: 9; width: min(100%, 720px); transform: translateX(-50%); pointer-events: none; visibility: hidden; }
-.conversation-sidebar-layer.open { pointer-events: auto; visibility: visible; }
-.conversation-sidebar { position: absolute; inset-block: 0; left: 0; width: 85%; overflow: hidden; background: #fff; box-shadow: 18px 0 42px rgba(0,0,0,.12); transform: translateX(-104%); transition: transform .24s cubic-bezier(.22,.7,.2,1); }
+.conversation-sidebar-layer { --sidebar-motion-duration: .24s; --sidebar-motion-easing: cubic-bezier(.22,.7,.2,1); position: fixed; inset-block: 0; left: 50%; z-index: 9; width: min(100%, 720px); transform: translateX(-50%); pointer-events: none; visibility: hidden; transition: visibility 0s linear var(--sidebar-motion-duration); }
+.conversation-sidebar-layer.open { pointer-events: auto; visibility: visible; transition-delay: 0s; }
+.conversation-sidebar { position: absolute; z-index: 1; inset-block: 0; left: 0; width: 85%; overflow: hidden; background: #fff; box-shadow: 18px 0 42px rgba(0,0,0,.12); transform: translateX(-104%); transition: transform var(--sidebar-motion-duration) var(--sidebar-motion-easing); }
 .conversation-sidebar-layer.open .conversation-sidebar { transform: translateX(0); }
-.conversation-sidebar-scrim { position: absolute; inset-block: 0; right: 0; width: 15%; border: 0; background: rgba(10,10,10,.24); opacity: 0; transition: opacity .2s ease; }
+.conversation-sidebar-scrim { position: absolute; inset: 0; border: 0; background: rgba(10,10,10,.24); opacity: 0; transition: opacity var(--sidebar-motion-duration) var(--sidebar-motion-easing); }
 .conversation-sidebar-layer.open .conversation-sidebar-scrim { opacity: 1; }
 .thread-list-page { position: relative; height: 100dvh; min-height: 100dvh; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px calc(58px + var(--browser-edge-bottom)); }
 .conversation { height: 100dvh; min-height: 0; overflow: hidden; display: grid; grid-template-rows: auto minmax(0,1fr); padding: var(--safe-area-top) 18px 0; }

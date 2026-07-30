@@ -245,4 +245,32 @@ describe("悬浮状态布局", () => {
     expect(composerRule).toContain("padding: 8px 22px 0");
   });
 
+  it("侧边栏面板与遮罩使用同一套展开动效", () => {
+    const layerRule =
+      styles.match(
+        /(?:^|\n)\.conversation-sidebar-layer\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+    const sidebarRule =
+      styles.match(
+        /(?:^|\n)\.conversation-sidebar\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+    const scrimRule =
+      styles.match(
+        /(?:^|\n)\.conversation-sidebar-scrim\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+
+    expect(layerRule).toContain("--sidebar-motion-duration: .24s");
+    expect(layerRule).toContain(
+      "--sidebar-motion-easing: cubic-bezier(.22,.7,.2,1)",
+    );
+    expect(sidebarRule).toContain(
+      "transition: transform var(--sidebar-motion-duration) var(--sidebar-motion-easing)",
+    );
+    expect(sidebarRule).toContain("z-index: 1");
+    expect(scrimRule).toContain("inset: 0");
+    expect(scrimRule).toContain(
+      "transition: opacity var(--sidebar-motion-duration) var(--sidebar-motion-easing)",
+    );
+  });
+
 });
