@@ -323,8 +323,8 @@ describe("移动 App 内置前端流水线", () => {
       "version",
       "build",
       "ios",
-      "npm",
     ]);
+    expect(workflow.jobs.release?.if).not.toContain("needs.npm.result");
     expect(workflow.jobs.release?.permissions?.contents).toBe("write");
     expect(workflow.jobs.release?.if).toContain("github.event_name == 'push'");
     const publish = workflow.jobs.release?.steps.find(

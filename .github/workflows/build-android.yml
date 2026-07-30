@@ -869,13 +869,11 @@ jobs:
       github.ref == 'refs/heads/main' &&
       needs.version.result == 'success' &&
       needs.build.result == 'success' &&
-      needs.ios.result == 'success' &&
-      (needs.npm.result == 'success' || needs.npm.result == 'skipped')
+      needs.ios.result == 'success'
     needs:
       - version
       - build
       - ios
-      - npm
     runs-on: ubuntu-latest
     permissions:
       contents: write
