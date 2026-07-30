@@ -1,4 +1,4 @@
-name: Build Android App
+name: Build Mobile Apps
 
 on:
   push:
@@ -6,22 +6,33 @@ on:
       - main
     paths:
       - "src/**"
+      - "server/**"
+      - "bin/**"
       - "public/**"
       - "index.html"
       - "package.json"
       - "package-lock.json"
       - "tsconfig*.json"
+      - "tsconfig.npm.json"
       - "vite.config.ts"
       - "docs/assets/app-icon/codex-mobile-app-icon-1024.png"
       - "scripts/compose-mobile-app-icon.sh"
       - ".github/workflows/build-android.yml"
+      - ".github/workflows/build-ios.yml"
+      - ".github/workflows/publish-npm.yml"
   workflow_dispatch:
+    inputs:
+      publish_npm:
+        description: Also publish the npm gateway package
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: android-release-${{ github.ref }}
+  group: mobile-release-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -30,17 +41,19 @@ env:
   APP_ID: vip.loock.codexmobile
 
 jobs:
-  build:
-    name: Build Codex Mobile Android
+  version:
+    name: Resolve shared release version
     runs-on: ubuntu-latest
     outputs:
       app_version: ${{ steps.version.outputs.app_version }}
       release_tag: ${{ steps.version.outputs.release_tag }}
+      publish_npm: ${{ steps.version.outputs.publish_npm }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Resolve app version
@@ -73,6 +86,39 @@ jobs:
           echo "APP_VERSION_CODE=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
           echo "app_version=$version" >> "$GITHUB_OUTPUT"
           echo "release_tag=v$version" >> "$GITHUB_OUTPUT"
+          publish_npm=false
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            base="${{ github.event.before }}"
+            if [[ "$base" =~ ^0+$ ]]; then
+              base="$(git rev-list --max-parents=0 "$GITHUB_SHA")"
+            fi
+            if ! git diff --quiet "$base" "$GITHUB_SHA" -- \
+              server/ \
+              bin/ \
+              tsconfig.npm.json \
+              package.json \
+              package-lock.json \
+              .github/workflows/publish-npm.yml; then
+              publish_npm=true
+            fi
+          elif [[ "${{ inputs.publish_npm }}" == "true" ]]; then
+            publish_npm=true
+          fi
+          echo "publish_npm=$publish_npm" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build Codex Mobile Android
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      APP_VERSION: ${{ needs.version.outputs.app_version }}
+      APP_VERSION_CODE: ${{ github.run_number }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Checkout pinned PakePlus Android
         uses: actions/checkout@v4
@@ -796,10 +842,40 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  ios:
+    name: Build Codex Mobile iOS
+    needs: version
+    uses: ./.github/workflows/build-ios.yml
+    with:
+      app_version: ${{ needs.version.outputs.app_version }}
+
+  npm:
+    name: Publish codex-mobile npm package
+    needs: version
+    if: needs.version.outputs.publish_npm == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/publish-npm.yml
+    with:
+      app_version: ${{ needs.version.outputs.app_version }}
+    secrets: inherit
+
   release:
-    name: Publish Codex Mobile Android
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: build
+    name: Publish Codex Mobile Release
+    if: >-
+      always() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      needs.version.result == 'success' &&
+      needs.build.result == 'success' &&
+      needs.ios.result == 'success' &&
+      (needs.npm.result == 'success' || needs.npm.result == 'skipped')
+    needs:
+      - version
+      - build
+      - ios
+      - npm
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -810,21 +886,33 @@ jobs:
           name: CodexMobile-android
           path: release
 
+      - name: Download verified unsigned IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: CodexMobile-ios-unsigned
+          path: release
+
       - name: Publish GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          APP_VERSION: ${{ needs.build.outputs.app_version }}
-          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
+          APP_VERSION: ${{ needs.version.outputs.app_version }}
+          RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
         run: |
           set -euo pipefail
           apk="release/CodexMobile-v${APP_VERSION}.apk"
-          checksum="${apk}.sha256"
+          apk_checksum="${apk}.sha256"
+          ipa="release/CodexMobile-v${APP_VERSION}-unsigned.ipa"
+          ipa_checksum="${ipa}.sha256"
           test -s "$apk"
-          test -s "$checksum"
+          test -s "$apk_checksum"
+          test -s "$ipa"
+          test -s "$ipa_checksum"
           (
             cd release
             sha256sum --check "CodexMobile-v${APP_VERSION}.apk.sha256"
+            sha256sum --check \
+              "CodexMobile-v${APP_VERSION}-unsigned.ipa.sha256"
           )
           cleanup_draft() {
             gh release delete "$RELEASE_TAG" \
@@ -835,7 +923,9 @@ jobs:
           trap cleanup_draft ERR INT TERM
           gh release create "$RELEASE_TAG" \
             "$apk" \
-            "$checksum" \
+            "$apk_checksum" \
+            "$ipa" \
+            "$ipa_checksum" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "Codex Mobile $RELEASE_TAG" \

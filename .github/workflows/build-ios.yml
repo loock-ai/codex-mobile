@@ -1,10 +1,18 @@
 name: Build iOS App
 
 on:
-  release:
-    types:
-      - published
+  workflow_call:
+    inputs:
+      app_version:
+        description: Version shared by all release artifacts
+        required: true
+        type: string
   workflow_dispatch:
+    inputs:
+      app_version:
+        description: Optional version override
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -27,20 +35,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || github.ref }}
           persist-credentials: false
 
       - name: Resolve app version
         shell: bash
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REQUESTED_VERSION: ${{ inputs.app_version }}
         run: |
           set -euo pipefail
-          if [[ -n "$RELEASE_TAG" ]]; then
-            version="${RELEASE_TAG#v}"
-          else
-            version="$(node -p "require('./package.json').version")"
-          fi
+          version="${REQUESTED_VERSION:-$(node -p "require('./package.json').version")}"
+          version="${version#v}"
           node -e '
             const version = process.argv[1];
             if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
@@ -424,12 +428,19 @@ jobs:
           unzip -q "$artifact" -d "$unpacked"
           node "$RUNNER_TEMP/scan-mobile-assets.cjs" \
             "$unpacked/Payload/PakePlus.app"
-          shasum -a 256 "$artifact"
+          (
+            cd "$RUNNER_TEMP"
+            shasum -a 256 "CodexMobile-v${APP_VERSION}-unsigned.ipa" \
+              > "CodexMobile-v${APP_VERSION}-unsigned.ipa.sha256"
+          )
+          cat "$artifact.sha256"
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
           name: CodexMobile-ios-unsigned
-          path: ${{ runner.temp }}/CodexMobile-v${{ env.APP_VERSION }}-unsigned.ipa
+          path: |
+            ${{ runner.temp }}/CodexMobile-v${{ env.APP_VERSION }}-unsigned.ipa
+            ${{ runner.temp }}/CodexMobile-v${{ env.APP_VERSION }}-unsigned.ipa.sha256
           if-no-files-found: error
           retention-days: 7

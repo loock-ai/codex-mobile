@@ -4,8 +4,13 @@ import { parse } from "yaml";
 
 interface PublishWorkflow {
   on?: {
-    release?: {
-      types?: string[];
+    workflow_call?: {
+      inputs?: {
+        app_version?: {
+          required?: boolean;
+          type?: string;
+        };
+      };
     };
   };
   permissions?: {
@@ -26,7 +31,7 @@ interface PublishWorkflow {
 }
 
 describe("npm 自动发布流水线", () => {
-  it("GitHub Release 发布后验证、构建并发布同版本 npm 包", () => {
+  it("统一发布流水线传入版本后验证、构建并发布同版本 npm 包", () => {
     const source = readFileSync(
       ".github/workflows/publish-npm.yml",
       "utf8",
@@ -38,7 +43,10 @@ describe("npm 自动发布流水线", () => {
       step.run?.includes("npm publish"),
     );
 
-    expect(workflow.on?.release?.types).toContain("published");
+    expect(workflow.on?.workflow_call?.inputs?.app_version).toMatchObject({
+      required: true,
+      type: "string",
+    });
     expect(workflow.permissions).toMatchObject({
       contents: "read",
       "id-token": "write",
@@ -59,6 +67,7 @@ describe("npm 自动发布流水线", () => {
     expect(script).toContain("npm test");
     expect(script).toContain("npm run build:package");
     expect(script).toContain("npm version");
+    expect(source).toContain("inputs.app_version");
     expect(script).toContain("npm publish --access public --provenance");
     expect(publish?.env?.NODE_AUTH_TOKEN).toContain("secrets.NPM_TOKEN");
   });

@@ -28,6 +28,9 @@ interface Workflow {
     release?: {
       types?: string[];
     };
+    workflow_call?: {
+      inputs?: Record<string, unknown>;
+    };
     workflow_dispatch?: unknown;
   };
   concurrency?: {
@@ -38,13 +41,31 @@ interface Workflow {
     contents?: string;
   };
   jobs: {
-    build: {
+    version?: {
       outputs?: Record<string, string>;
       steps: WorkflowStep[];
     };
-    release?: {
+    build: {
+      needs?: string;
+      env?: Record<string, string>;
+      outputs?: Record<string, string>;
+      steps: WorkflowStep[];
+    };
+    ios?: {
+      needs?: string;
+      uses?: string;
+      with?: Record<string, string>;
+    };
+    npm?: {
       if?: string;
       needs?: string;
+      uses?: string;
+      with?: Record<string, string>;
+      secrets?: string;
+    };
+    release?: {
+      if?: string;
+      needs?: string | string[];
       permissions?: {
         contents?: string;
       };
@@ -61,12 +82,24 @@ function readWorkflow(path: string) {
   return { source, workflow };
 }
 
-function readRunStep(workflow: Workflow, name: string) {
-  const step = workflow.jobs.build.steps.find((candidate) => candidate.name === name);
+function readJobRunStep(
+  workflow: Workflow,
+  jobName: "version" | "build",
+  name: string,
+) {
+  const step = workflow.jobs[jobName]?.steps.find(
+    (candidate) => candidate.name === name,
+  );
 
-  expect(step, `找不到流水线步骤：${name}`).toBeDefined();
-  expect(step?.run, `流水线步骤没有 run 脚本：${name}`).toBeTypeOf("string");
+  expect(step, `找不到流水线步骤：${jobName}/${name}`).toBeDefined();
+  expect(step?.run, `流水线步骤没有 run 脚本：${jobName}/${name}`).toBeTypeOf(
+    "string",
+  );
   return step?.run ?? "";
+}
+
+function readRunStep(workflow: Workflow, name: string) {
+  return readJobRunStep(workflow, "build", name);
 }
 
 function readAssetScanner(workflow: Workflow) {
@@ -208,7 +241,7 @@ describe("移动 App 内置前端流水线", () => {
     expect(source).not.toMatch(/192\.168\.\d+\.\d+/);
   });
 
-  it("Android 在 main 前端变更时自动递增版本并原子发布 Release", () => {
+  it("main 前端变更统一递增版本，并行构建双端后原子发布一个 Release", () => {
     const { source, workflow } = readWorkflow(
       ".github/workflows/build-android.yml",
     );
@@ -216,6 +249,8 @@ describe("移动 App 内置前端流水线", () => {
     expect(workflow.on?.push?.paths).toEqual(
       expect.arrayContaining([
         "src/**",
+        "server/**",
+        "bin/**",
         "public/**",
         "index.html",
         "package.json",
@@ -224,6 +259,7 @@ describe("移动 App 内置前端流水线", () => {
         "docs/assets/app-icon/codex-mobile-app-icon-1024.png",
         "scripts/compose-mobile-app-icon.sh",
         ".github/workflows/build-android.yml",
+        ".github/workflows/build-ios.yml",
       ]),
     );
     expect(workflow.on).toHaveProperty("workflow_dispatch");
@@ -232,13 +268,44 @@ describe("移动 App 内置前端流水线", () => {
     });
     expect(workflow.permissions?.contents).toBe("read");
 
-    const resolveVersion = readRunStep(workflow, "Resolve app version");
+    const resolveVersion = readJobRunStep(
+      workflow,
+      "version",
+      "Resolve app version",
+    );
     expect(resolveVersion).toContain("releases/latest");
     expect(resolveVersion).toContain("package.json");
     expect(resolveVersion).toContain("patch + 1");
     expect(resolveVersion).toContain("GITHUB_OUTPUT");
     expect(resolveVersion).toContain("GITHUB_ENV");
-    expect(workflow.jobs.build.outputs).toHaveProperty("app_version");
+    expect(workflow.jobs.version?.outputs).toHaveProperty("app_version");
+    expect(workflow.jobs.version?.outputs).toHaveProperty("publish_npm");
+    expect(workflow.jobs.build.needs).toBe("version");
+    expect(workflow.jobs.build.env?.APP_VERSION).toContain(
+      "needs.version.outputs.app_version",
+    );
+    expect(workflow.jobs.ios).toMatchObject({
+      needs: "version",
+      uses: "./.github/workflows/build-ios.yml",
+    });
+    expect(workflow.jobs.ios?.with?.app_version).toContain(
+      "needs.version.outputs.app_version",
+    );
+    expect(workflow.jobs.npm).toMatchObject({
+      needs: "version",
+      uses: "./.github/workflows/publish-npm.yml",
+      secrets: "inherit",
+    });
+    expect(workflow.jobs.npm?.if).toContain(
+      "needs.version.outputs.publish_npm == 'true'",
+    );
+    expect(workflow.jobs.npm?.with?.app_version).toContain(
+      "needs.version.outputs.app_version",
+    );
+    expect(resolveVersion).toContain("server/");
+    expect(resolveVersion).toContain("bin/");
+    expect(resolveVersion).toContain("tsconfig.npm.json");
+    expect(resolveVersion).toContain("publish_npm");
 
     const hardenHost = readRunStep(
       workflow,
@@ -252,7 +319,12 @@ describe("移动 App 内置前端流水线", () => {
     expect(verifyArtifact).toContain("sha256sum");
     expect(verifyArtifact).toContain(".sha256");
 
-    expect(workflow.jobs.release?.needs).toBe("build");
+    expect(workflow.jobs.release?.needs).toEqual([
+      "version",
+      "build",
+      "ios",
+      "npm",
+    ]);
     expect(workflow.jobs.release?.permissions?.contents).toBe("write");
     expect(workflow.jobs.release?.if).toContain("github.event_name == 'push'");
     const publish = workflow.jobs.release?.steps.find(
@@ -265,6 +337,8 @@ describe("移动 App 内置前端流水线", () => {
     expect(publish).toContain("--draft=false");
     expect(publish).toContain("--cleanup-tag");
     expect(publish).toContain("CodexMobile-v");
+    expect(publish).toContain("-unsigned.ipa");
+    expect(publish).toContain("sha256sum --check");
     expect(source).toContain("actions/download-artifact@v4");
   });
 
@@ -311,7 +385,8 @@ describe("移动 App 内置前端流水线", () => {
     );
     const scanner = readAssetScanner(workflow);
 
-    expect(workflow.on?.release?.types).toContain("published");
+    expect(workflow.on?.release).toBeUndefined();
+    expect(workflow.on?.workflow_call?.inputs).toHaveProperty("app_version");
     expect(workflow.on).toHaveProperty("workflow_dispatch");
     expect(workflow.concurrency).toMatchObject({
       "cancel-in-progress": true,
@@ -324,8 +399,7 @@ describe("移动 App 内置前端流水线", () => {
     expect(installIcon).toContain('cmp "$icon" pakeplus/app-icon.png');
     expect(source).toContain(".phone.camera = true");
     expect(source).toContain("NSCameraUsageDescription");
-    expect(source).toContain("Resolve app version");
-    expect(source).toContain("github.event.release.tag_name");
+    expect(source).toContain("inputs.app_version");
     expect(source).not.toContain('APP_VERSION: "1.0.0"');
     expect(buildFrontend).toContain("npm ci");
     expect(buildFrontend).toContain("npm run build");
@@ -369,6 +443,7 @@ describe("移动 App 内置前端流水线", () => {
       'node "$RUNNER_TEMP/scan-mobile-assets.cjs"',
     );
     expect(verifyArtifact).toContain('"$unpacked/Payload/PakePlus.app"');
+    expect(verifyArtifact).toContain(".sha256");
     expect(source).toContain(".ios.isHtml = true");
     expect(source).toContain("vip.loock.codexmobile");
     expect(source).toContain("CODE_SIGNING_ALLOWED=NO");

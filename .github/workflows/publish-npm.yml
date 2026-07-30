@@ -1,16 +1,19 @@
 name: Publish npm Package
 
 on:
-  release:
-    types:
-      - published
+  workflow_call:
+    inputs:
+      app_version:
+        description: Version shared by the mobile release
+        required: true
+        type: string
 
 permissions:
   contents: read
   id-token: write
 
 concurrency:
-  group: npm-release-${{ github.event.release.tag_name }}
+  group: npm-release-${{ inputs.app_version }}
   cancel-in-progress: false
 
 jobs:
@@ -19,10 +22,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout released source
+      - name: Checkout release source
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.release.tag_name }}
           persist-credentials: false
 
       - name: Set up Node.js
@@ -38,10 +40,10 @@ jobs:
       - name: Match npm version to GitHub Release
         shell: bash
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          APP_VERSION: ${{ inputs.app_version }}
         run: |
           set -euo pipefail
-          version="${RELEASE_TAG#v}"
+          version="${APP_VERSION#v}"
           node -e '
             const version = process.argv[1];
             if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
