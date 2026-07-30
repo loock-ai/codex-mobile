@@ -35,6 +35,7 @@ import {
   clearPendingSteerForItem,
   clearPendingSteerForRequest,
   clearPendingSteerForThread,
+  clearPendingSteerForTimeline,
   mergeSteerDraft,
   type PendingSteerMessage,
 } from "./app-server/turn-steering";
@@ -326,6 +327,9 @@ function BackendWorkspace({
 
   useEffect(() => {
     activeRef.current = active;
+    setPendingSteerMessage((current) =>
+      clearPendingSteerForTimeline(current, active),
+    );
   }, [active]);
 
   useEffect(() => {

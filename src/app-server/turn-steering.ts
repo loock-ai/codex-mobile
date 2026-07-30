@@ -52,11 +52,36 @@ export function clearPendingSteerForItem(
     !current ||
     current.threadId !== String(params.threadId ?? "") ||
     params.item?.type !== "userMessage" ||
-    String(params.item.id ?? "") !== current.id
+    String(params.item.clientId ?? "") !== current.id
   ) {
     return current;
   }
   return null;
+}
+
+export function clearPendingSteerForTimeline(
+  current: PendingSteerMessage | null,
+  thread: DisplayRecord | null | undefined,
+) {
+  if (!current || current.threadId !== String(thread?.id ?? "")) {
+    return current;
+  }
+  const turns = Array.isArray(thread?.turns) ? thread.turns : [];
+  for (let turnIndex = turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
+    const items = Array.isArray(turns[turnIndex]?.items)
+      ? turns[turnIndex].items
+      : [];
+    for (let itemIndex = items.length - 1; itemIndex >= 0; itemIndex -= 1) {
+      const item = items[itemIndex];
+      if (
+        item?.type === "userMessage" &&
+        String(item.clientId ?? "") === current.id
+      ) {
+        return null;
+      }
+    }
+  }
+  return current;
 }
 
 export function buildTurnSteerParams({
