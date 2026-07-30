@@ -366,10 +366,12 @@ jobs:
               "android.permission.INTERNET",
               "android.permission.ACCESS_NETWORK_STATE",
               "android.permission.CAMERA",
+              "android.permission.RECORD_AUDIO",
               "android.permission.REQUEST_INSTALL_PACKAGES",
           }
           for required_permission in (
               "android.permission.CAMERA",
+              "android.permission.RECORD_AUDIO",
               "android.permission.REQUEST_INSTALL_PACKAGES",
           ):
               if not any(
@@ -440,6 +442,12 @@ jobs:
               webview_field
               + "    @Volatile\n"
               + "    private var nativeSafeAreaTopCssPx = 0.0\n"
+              + "    @Volatile\n"
+              + "    private var realtimeAudioRunning = false\n"
+              + "    @Volatile\n"
+              + "    private var realtimeAudioMuted = false\n"
+              + "    private var realtimeAudioRecord: android.media.AudioRecord? = null\n"
+              + "    private var realtimeAudioThread: Thread? = null\n"
           )
           original_insets = "\n".join((
               "            val systemBar = insets.getInsets(WindowInsetsCompat.Type.systemBars())",
@@ -484,6 +492,21 @@ jobs:
               "            ).install(downloadUrl, sha256)",
               "        }",
               "",
+              "        @JavascriptInterface",
+              "        fun realtimeAudioStart() {",
+              "            this@MainActivity.startRealtimeAudioWithPermission()",
+              "        }",
+              "",
+              "        @JavascriptInterface",
+              "        fun realtimeAudioStop() {",
+              "            this@MainActivity.stopRealtimeAudio()",
+              "        }",
+              "",
+              "        @JavascriptInterface",
+              "        fun realtimeAudioSetMuted(muted: Boolean) {",
+              "            this@MainActivity.realtimeAudioMuted = muted",
+              "        }",
+              "",
               "",
           ))
           interface_doc_anchor = "\n".join((
@@ -507,6 +530,131 @@ jobs:
               "                null,",
               "            )",
               "        }",
+              "    }",
+              "",
+              "    private fun emitRealtimeAudio(detail: JSONObject) {",
+              "        runOnUiThread {",
+              "            webView.evaluateJavascript(",
+              "                \"window.dispatchEvent(new CustomEvent('codex-mobile-realtime-audio',{detail:${detail}}))\",",
+              "                null,",
+              "            )",
+              "        }",
+              "    }",
+              "",
+              "    private fun startRealtimeAudioWithPermission() {",
+              "        runOnUiThread {",
+              "            if (",
+              "                androidx.core.content.ContextCompat.checkSelfPermission(",
+              "                    this,",
+              "                    Manifest.permission.RECORD_AUDIO,",
+              "                ) == android.content.pm.PackageManager.PERMISSION_GRANTED",
+              "            ) {",
+              "                startRealtimeAudio()",
+              "            } else {",
+              "                androidx.core.app.ActivityCompat.requestPermissions(",
+              "                    this,",
+              "                    arrayOf(Manifest.permission.RECORD_AUDIO),",
+              "                    5102,",
+              "                )",
+              "            }",
+              "        }",
+              "    }",
+              "",
+              "    override fun onRequestPermissionsResult(",
+              "        requestCode: Int,",
+              "        permissions: Array<out String>,",
+              "        grantResults: IntArray,",
+              "    ) {",
+              "        super.onRequestPermissionsResult(requestCode, permissions, grantResults)",
+              "        if (requestCode != 5102) return",
+              "        if (",
+              "            grantResults.firstOrNull() ==",
+              "                android.content.pm.PackageManager.PERMISSION_GRANTED",
+              "        ) {",
+              "            startRealtimeAudio()",
+              "        } else {",
+              "            emitRealtimeAudio(",
+              "                JSONObject()",
+              "                    .put(\"type\", \"error\")",
+              "                    .put(\"message\", \"麦克风权限未授权\")",
+              "            )",
+              "        }",
+              "    }",
+              "",
+              "    @SuppressLint(\"MissingPermission\")",
+              "    private fun startRealtimeAudio() {",
+              "        if (realtimeAudioRunning) return",
+              "        val sampleRate = 24_000",
+              "        val channel = android.media.AudioFormat.CHANNEL_IN_MONO",
+              "        val encoding = android.media.AudioFormat.ENCODING_PCM_16BIT",
+              "        val minimum = android.media.AudioRecord.getMinBufferSize(",
+              "            sampleRate, channel, encoding",
+              "        )",
+              "        if (minimum <= 0) {",
+              "            emitRealtimeAudio(",
+              "                JSONObject().put(\"type\", \"error\")",
+              "                    .put(\"message\", \"无法初始化麦克风\")",
+              "            )",
+              "            return",
+              "        }",
+              "        val recorder = android.media.AudioRecord(",
+              "            android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION,",
+              "            sampleRate,",
+              "            channel,",
+              "            encoding,",
+              "            maxOf(minimum, 4_800),",
+              "        )",
+              "        if (recorder.state != android.media.AudioRecord.STATE_INITIALIZED) {",
+              "            recorder.release()",
+              "            emitRealtimeAudio(",
+              "                JSONObject().put(\"type\", \"error\")",
+              "                    .put(\"message\", \"麦克风初始化失败\")",
+              "            )",
+              "            return",
+              "        }",
+              "        realtimeAudioRecord = recorder",
+              "        realtimeAudioMuted = false",
+              "        realtimeAudioRunning = true",
+              "        recorder.startRecording()",
+              "        emitRealtimeAudio(JSONObject().put(\"type\", \"started\"))",
+              "        realtimeAudioThread = kotlin.concurrent.thread(",
+              "            name = \"codex-mobile-realtime-audio\"",
+              "        ) {",
+              "            val samples = ShortArray(2_400)",
+              "            while (realtimeAudioRunning) {",
+              "                val count = recorder.read(samples, 0, samples.size)",
+              "                if (count <= 0 || realtimeAudioMuted) continue",
+              "                val bytes = ByteArray(count * 2)",
+              "                for (index in 0 until count) {",
+              "                    val value = samples[index].toInt()",
+              "                    bytes[index * 2] = (value and 0xff).toByte()",
+              "                    bytes[index * 2 + 1] = ((value shr 8) and 0xff).toByte()",
+              "                }",
+              "                emitRealtimeAudio(",
+              "                    JSONObject()",
+              "                        .put(\"type\", \"chunk\")",
+              "                        .put(",
+              "                            \"data\",",
+              "                            android.util.Base64.encodeToString(",
+              "                                bytes, android.util.Base64.NO_WRAP",
+              "                            ),",
+              "                        )",
+              "                        .put(\"sampleRate\", sampleRate)",
+              "                        .put(\"numChannels\", 1)",
+              "                        .put(\"samplesPerChannel\", count)",
+              "                )",
+              "            }",
+              "        }",
+              "    }",
+              "",
+              "    private fun stopRealtimeAudio() {",
+              "        realtimeAudioRunning = false",
+              "        val recorder = realtimeAudioRecord",
+              "        realtimeAudioRecord = null",
+              "        try { recorder?.stop() } catch (_: IllegalStateException) {}",
+              "        recorder?.release()",
+              "        realtimeAudioThread = null",
+              "        emitRealtimeAudio(JSONObject().put(\"type\", \"stopped\"))",
               "    }",
               "",
               interface_doc_anchor,
@@ -734,12 +882,24 @@ jobs:
           grep -Fq 'android:allowBackup="false"' app/src/main/AndroidManifest.xml
           grep -Fq 'android.permission.REQUEST_INSTALL_PACKAGES' \
             app/src/main/AndroidManifest.xml
+          grep -Fq 'android.permission.RECORD_AUDIO' \
+            app/src/main/AndroidManifest.xml
+          grep -Fq 'override fun onPermissionRequest' \
+            app/src/main/java/com/app/pakeplus/MainActivity.kt
+          grep -Fq 'PermissionRequest.RESOURCE_AUDIO_CAPTURE' \
+            app/src/main/java/com/app/pakeplus/MainActivity.kt
+          grep -Fq 'fun realtimeAudioStart()' \
+            app/src/main/java/com/app/pakeplus/MainActivity.kt
+          grep -Fq 'android.media.AudioRecord' \
+            app/src/main/java/com/app/pakeplus/MainActivity.kt
+          grep -Fq 'codex-mobile-realtime-audio' \
+            app/src/main/java/com/app/pakeplus/MainActivity.kt
           grep -Fq '${applicationId}.fileprovider' \
             app/src/main/AndroidManifest.xml
           grep -Fq 'update_file_paths' app/src/main/AndroidManifest.xml
           test -s app/src/main/res/xml/update_file_paths.xml
           if grep -Eq \
-            'ACCESS_(FINE|COARSE)_LOCATION|RECORD_AUDIO|EXTERNAL_STORAGE|READ_MEDIA|SYSTEM_ALERT_WINDOW|dataExtractionRules|fullBackupContent' \
+            'ACCESS_(FINE|COARSE)_LOCATION|EXTERNAL_STORAGE|READ_MEDIA|SYSTEM_ALERT_WINDOW|dataExtractionRules|fullBackupContent' \
             app/src/main/AndroidManifest.xml; then
             echo "::error::Android manifest contains an unnecessary capability"
             exit 1
@@ -789,6 +949,7 @@ jobs:
               "android.permission.INTERNET",
               "android.permission.ACCESS_NETWORK_STATE",
               "android.permission.CAMERA",
+              "android.permission.RECORD_AUDIO",
               "android.permission.REQUEST_INSTALL_PACKAGES",
               dynamic_receiver_permission,
           }

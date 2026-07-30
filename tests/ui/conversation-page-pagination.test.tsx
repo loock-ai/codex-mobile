@@ -175,6 +175,28 @@ describe("会话详情历史分页", () => {
     expect(steering.getAttribute("disabled")).not.toBeNull();
   });
 
+  it("空闲已有会话且输入为空时显示实时语音入口", () => {
+    const { container } = renderConversation("exhausted");
+    const view = within(container);
+
+    expect(view.getByRole("button", { name: "开始实时语音" })).not.toBeNull();
+    expect(view.queryByRole("button", { name: "发送" })).toBeNull();
+  });
+
+  it("输入文字后仍显示原发送按钮，不改变文字提交", () => {
+    const onSubmit = vi.fn((event: FormEvent) => event.preventDefault());
+    const { container } = renderConversation(
+      "exhausted",
+      undefined,
+      { draft: "继续完成测试", onSubmit },
+    );
+    const view = within(container);
+
+    expect(view.queryByRole("button", { name: "开始实时语音" })).toBeNull();
+    fireEvent.click(view.getByRole("button", { name: "发送" }));
+    expect(onSubmit).toHaveBeenCalledOnce();
+  });
+
   it("引导发送后在输入框上方临时展示单行消息", () => {
     const { container } = renderConversation(
       "exhausted",

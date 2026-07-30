@@ -199,6 +199,14 @@ describe("移动 App 内置前端流水线", () => {
     expect(hardenHost).toContain("allowed_permissions");
     expect(source).toContain(".phone.camera = true");
     expect(hardenHost).toContain("android.permission.CAMERA");
+    expect(hardenHost).toContain("android.permission.RECORD_AUDIO");
+    expect(hardenHost).toContain("onPermissionRequest");
+    expect(hardenHost).toContain("PermissionRequest.RESOURCE_AUDIO_CAPTURE");
+    expect(hardenHost).toContain("fun realtimeAudioStart()");
+    expect(hardenHost).toContain("fun realtimeAudioStop()");
+    expect(hardenHost).toContain("fun realtimeAudioSetMuted(");
+    expect(hardenHost).toContain("android.media.AudioRecord");
+    expect(hardenHost).toContain("codex-mobile-realtime-audio");
     expect(hardenHost).toContain('android:allowBackup="false"');
     expect(hardenHost).toContain("enableEdgeToEdge()");
     expect(hardenHost).toContain(
@@ -399,6 +407,7 @@ describe("移动 App 内置前端流水线", () => {
     expect(installIcon).toContain('cmp "$icon" pakeplus/app-icon.png');
     expect(source).toContain(".phone.camera = true");
     expect(source).toContain("NSCameraUsageDescription");
+    expect(source).toContain("NSMicrophoneUsageDescription");
     expect(source).toContain("inputs.app_version");
     expect(source).not.toContain('APP_VERSION: "1.0.0"');
     expect(buildFrontend).toContain("npm ci");
@@ -423,7 +432,11 @@ describe("移动 App 内置前端流水线", () => {
     );
     expect(hardenHost).toContain("Delete :UIBackgroundModes");
     expect(hardenHost).toContain("developerExtrasEnabled");
-    expect(hardenHost).toContain("decisionHandler(.deny)");
+    expect(hardenHost).toContain("case .microphone");
+    expect(hardenHost).toContain("return .grant");
+    expect(hardenHost).toContain('name: "realtimeAudio"');
+    expect(hardenHost).toContain("AVAudioEngine");
+    expect(hardenHost).toContain("codex-mobile-realtime-audio");
     expect(hardenHost).toContain(
       'index_source.replace("./assets/", "./")',
     );

@@ -2,6 +2,7 @@ import {
   type FormEvent,
   type RefObject,
   type UIEventHandler,
+  useEffect,
   useState,
 } from "react";
 import { AppServerClient } from "../../app-server/client";
@@ -28,8 +29,83 @@ import {
 } from "./ConversationControls";
 import { ImagePreviewSheet } from "./sheets/ImagePreviewSheet";
 import { useConversationAutoScroll } from "./conversation-scroll";
+import { useRealtimeConversation } from "./useRealtimeConversation";
 
 export type ConversationLoadState = "idle" | "loading" | "ready" | "error";
+
+function formatRealtimeDuration(startedAt: number | null, now: number) {
+  if (!startedAt) return "00:00";
+  const seconds = Math.max(0, Math.floor((now - startedAt) / 1000));
+  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(
+    seconds % 60,
+  ).padStart(2, "0")}`;
+}
+
+function RealtimeControls({
+  status,
+  startedAt,
+  muted,
+  userTranscript,
+  assistantTranscript,
+  onToggleMute,
+  onStop,
+}: {
+  status: "connecting" | "listening" | "stopping";
+  startedAt: number | null;
+  muted: boolean;
+  userTranscript: string;
+  assistantTranscript: string;
+  onToggleMute: () => void;
+  onStop: () => void;
+}) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const statusLabel =
+    status === "connecting"
+      ? "正在连接"
+      : status === "stopping"
+        ? "正在结束"
+        : muted
+          ? "已静音"
+          : assistantTranscript
+            ? "Codex 正在回复"
+            : "正在聆听";
+  return (
+    <section className="realtime-panel" aria-label="实时语音控制">
+      {(userTranscript || assistantTranscript) && (
+        <div className="realtime-transcript" aria-live="polite">
+          {userTranscript && <p className="user">{userTranscript}</p>}
+          {assistantTranscript && <p>{assistantTranscript}</p>}
+        </div>
+      )}
+      <div className="realtime-controls">
+        <span>
+          <i className="realtime-pulse" aria-hidden="true" />
+          <strong>{statusLabel}</strong>
+          <time>{formatRealtimeDuration(startedAt, now)}</time>
+        </span>
+        <button
+          type="button"
+          disabled={status !== "listening"}
+          onClick={onToggleMute}
+        >
+          {muted ? "恢复" : "静音"}
+        </button>
+        <button
+          type="button"
+          className="realtime-stop"
+          disabled={status === "stopping"}
+          onClick={onStop}
+        >
+          结束
+        </button>
+      </div>
+    </section>
+  );
+}
 
 export function ConversationPage({
   active,
@@ -123,6 +199,16 @@ export function ConversationPage({
   const isNewChat = !active.id;
   const hasDraft = Boolean(draft.trim() || draftImages.length);
   const canSteer = busy && steerable && hasDraft;
+  const realtime = useRealtimeConversation({
+    client,
+    threadId: String(active.id ?? ""),
+    connectionOnline: connection === "online",
+  });
+  const realtimeActive = ["connecting", "listening", "stopping"].includes(
+    realtime.state.status,
+  );
+  const showRealtimeEntry =
+    !isNewChat && !busy && !hasDraft && !realtimeActive;
   const {
     scrollRef,
     contentRef,
@@ -347,6 +433,29 @@ export function ConversationPage({
         aria-busy={imageReading}
         onSubmit={onSubmit}
       >
+        {realtimeActive && (
+          <RealtimeControls
+            status={
+              realtime.state.status as "connecting" | "listening" | "stopping"
+            }
+            startedAt={realtime.state.startedAt}
+            muted={realtime.state.muted}
+            userTranscript={realtime.state.userTranscript}
+            assistantTranscript={realtime.state.assistantTranscript}
+            onToggleMute={realtime.toggleMute}
+            onStop={() => void realtime.stop()}
+          />
+        )}
+        {realtime.state.status === "error" && (
+          <button
+            type="button"
+            className="realtime-error"
+            role="alert"
+            onClick={realtime.dismissError}
+          >
+            {realtime.state.error}，点击关闭
+          </button>
+        )}
         {pendingSteerText && (
           <div
             className="pending-steer-message"
@@ -434,6 +543,7 @@ export function ConversationPage({
             aria-label="添加附件"
             disabled={
               !interactive ||
+              realtimeActive ||
               imageReading ||
               draftImages.length >= MAX_DRAFT_IMAGES ||
               draftImages.reduce((total, image) => total + image.size, 0) >=
@@ -446,17 +556,27 @@ export function ConversationPage({
           <textarea
             aria-label="向 Codex 提问"
             value={draft}
-            disabled={!interactive || steering}
+            disabled={!interactive || steering || realtimeActive}
             onChange={(event) => onDraftChange(event.target.value)}
             placeholder="向 Codex 提问"
             rows={1}
           />
           <button
-            type={busy && !canSteer ? "button" : "submit"}
-            onClick={busy && !canSteer ? onInterrupt : undefined}
+            type={
+              showRealtimeEntry || (busy && !canSteer) ? "button" : "submit"
+            }
+            onClick={
+              showRealtimeEntry
+                ? () => void realtime.start()
+                : busy && !canSteer
+                  ? onInterrupt
+                  : undefined
+            }
             className="send-button"
             aria-label={
-              steering
+              showRealtimeEntry
+                ? "开始实时语音"
+                : steering
                 ? "正在引导"
                 : canSteer
                   ? "引导"
@@ -466,12 +586,15 @@ export function ConversationPage({
             }
             disabled={
               !interactive ||
+              (showRealtimeEntry && !client) ||
               steering ||
               (canSteer && imageReading) ||
-              (!busy && (imageReading || !hasDraft))
+              (!busy && !showRealtimeEntry && (imageReading || !hasDraft))
             }
           >
-            {steering ? (
+            {showRealtimeEntry ? (
+              <AppIcon name="microphone" />
+            ) : steering ? (
               <i className="action-spinner composer-steer-spinner" />
             ) : (
               <AppIcon name={busy && !canSteer ? "stop" : "send"} />

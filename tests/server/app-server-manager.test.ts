@@ -38,6 +38,8 @@ describe("app-server 运行模式", () => {
   it("Managed 模式生成仅监听回环地址的启动命令", () => {
     expect(appServerCommand(18765)).toEqual([
       "app-server",
+      "--enable",
+      "realtime_conversation",
       "--listen",
       "ws://127.0.0.1:18765",
     ]);

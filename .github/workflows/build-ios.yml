@@ -274,6 +274,12 @@ jobs:
               -c "Set :NSCameraUsageDescription 扫描 Codex Mobile 网关连接二维码" \
               "$plist"
           /usr/libexec/PlistBuddy \
+            -c "Add :NSMicrophoneUsageDescription string 与 Codex 进行实时语音交互" \
+            "$plist" 2>/dev/null \
+            || /usr/libexec/PlistBuddy \
+              -c "Set :NSMicrophoneUsageDescription 与 Codex 进行实时语音交互" \
+              "$plist"
+          /usr/libexec/PlistBuddy \
             -c "Delete :NSLocationWhenInUseUsageDescription" \
             "$plist" 2>/dev/null || true
           /usr/libexec/PlistBuddy \
@@ -310,7 +316,235 @@ jobs:
           media_prompt = "        decisionHandler(permissionDecisionForMediaCapture(type: type))"
           if media_prompt not in source:
               raise SystemExit("Pinned PakePlus media permission hook changed")
-          source = source.replace(media_prompt, "        decisionHandler(.deny)")
+          bridge_registration = (
+              '        webView.configuration.userContentController.add('
+              'context.coordinator, name: "blobDownload")'
+          )
+          if source.count(bridge_registration) != 1:
+              raise SystemExit("Pinned PakePlus script bridge registration changed")
+          source = source.replace(
+              bridge_registration,
+              bridge_registration
+              + '\\n        webView.configuration.userContentController.add('
+              'context.coordinator, name: "realtimeAudio")'
+              + '\\n        context.coordinator.realtimeWebView = webView',
+              1,
+          )
+          coordinator_fields = (
+              "    private var locationManager: CLLocationManager?\\n"
+          )
+          if source.count(coordinator_fields) != 1:
+              raise SystemExit("Pinned PakePlus Coordinator fields changed")
+          source = source.replace(
+              coordinator_fields,
+              coordinator_fields
+              + "    weak var realtimeWebView: WKWebView?\\n"
+              + "    private var realtimeAudioEngine: AVAudioEngine?\\n"
+              + "    private var realtimeAudioConverter: AVAudioConverter?\\n"
+              + "    private var realtimeAudioMuted = false\\n",
+              1,
+          )
+          message_handler = (
+              "    func userContentController(_ userContentController: "
+              "WKUserContentController, didReceive message: WKScriptMessage) {\\n"
+              '        guard message.name == "blobDownload" else { return }'
+          )
+          if source.count(message_handler) != 1:
+              raise SystemExit("Pinned PakePlus message handler changed")
+          source = source.replace(
+              message_handler,
+              "    func userContentController(_ userContentController: "
+              "WKUserContentController, didReceive message: WKScriptMessage) {\\n"
+              '        if message.name == "realtimeAudio" {\\n'
+              "            handleRealtimeAudioMessage(message)\\n"
+              "            return\\n"
+              "        }\\n"
+              '        guard message.name == "blobDownload" else { return }',
+              1,
+          )
+          source += r'''
+
+          private extension Coordinator {
+              func handleRealtimeAudioMessage(_ message: WKScriptMessage) {
+                  guard let body = message.body as? [String: Any],
+                        let action = body["action"] as? String else { return }
+                  switch action {
+                  case "start":
+                      requestAndStartRealtimeAudio()
+                  case "stop":
+                      stopRealtimeAudio()
+                  case "mute":
+                      realtimeAudioMuted = (body["muted"] as? Bool) ?? false
+                  default:
+                      break
+                  }
+              }
+
+              func requestAndStartRealtimeAudio() {
+                  let session = AVAudioSession.sharedInstance()
+                  switch session.recordPermission {
+                  case .granted:
+                      startRealtimeAudio()
+                  case .undetermined:
+                      session.requestRecordPermission { [weak self] granted in
+                          DispatchQueue.main.async {
+                              if granted {
+                                  self?.startRealtimeAudio()
+                              } else {
+                                  self?.emitRealtimeAudio([
+                                      "type": "error",
+                                      "message": "麦克风权限未授权",
+                                  ])
+                              }
+                          }
+                      }
+                  case .denied:
+                      emitRealtimeAudio([
+                          "type": "error",
+                          "message": "麦克风权限未授权",
+                      ])
+                  @unknown default:
+                      emitRealtimeAudio([
+                          "type": "error",
+                          "message": "无法读取麦克风权限状态",
+                      ])
+                  }
+              }
+
+              func startRealtimeAudio() {
+                  if realtimeAudioEngine != nil { return }
+                  do {
+                      let session = AVAudioSession.sharedInstance()
+                      try session.setCategory(
+                          .playAndRecord,
+                          mode: .voiceChat,
+                          options: [.defaultToSpeaker, .allowBluetooth]
+                      )
+                      try session.setActive(true)
+
+                      let engine = AVAudioEngine()
+                      let input = engine.inputNode
+                      let inputFormat = input.inputFormat(forBus: 0)
+                      guard let targetFormat = AVAudioFormat(
+                          commonFormat: .pcmFormatInt16,
+                          sampleRate: 24_000,
+                          channels: 1,
+                          interleaved: true
+                      ), let converter = AVAudioConverter(
+                          from: inputFormat,
+                          to: targetFormat
+                      ) else {
+                          throw NSError(
+                              domain: "CodexMobileRealtimeAudio",
+                              code: 1,
+                              userInfo: [
+                                  NSLocalizedDescriptionKey:
+                                      "无法创建麦克风音频转换器"
+                              ]
+                          )
+                      }
+                      realtimeAudioEngine = engine
+                      realtimeAudioConverter = converter
+                      realtimeAudioMuted = false
+                      input.installTap(
+                          onBus: 0,
+                          bufferSize: 2_400,
+                          format: inputFormat
+                      ) { [weak self] buffer, _ in
+                          self?.convertAndEmitRealtimeAudio(
+                              buffer,
+                              targetFormat: targetFormat
+                          )
+                      }
+                      engine.prepare()
+                      try engine.start()
+                      emitRealtimeAudio(["type": "started"])
+                  } catch {
+                      stopRealtimeAudio()
+                      emitRealtimeAudio([
+                          "type": "error",
+                          "message": error.localizedDescription,
+                      ])
+                  }
+              }
+
+              func convertAndEmitRealtimeAudio(
+                  _ input: AVAudioPCMBuffer,
+                  targetFormat: AVAudioFormat
+              ) {
+                  guard !realtimeAudioMuted,
+                        let converter = realtimeAudioConverter else { return }
+                  let ratio = targetFormat.sampleRate / input.format.sampleRate
+                  let capacity = AVAudioFrameCount(
+                      ceil(Double(input.frameLength) * ratio) + 32
+                  )
+                  guard let output = AVAudioPCMBuffer(
+                      pcmFormat: targetFormat,
+                      frameCapacity: capacity
+                  ) else { return }
+                  var supplied = false
+                  var conversionError: NSError?
+                  let status = converter.convert(
+                      to: output,
+                      error: &conversionError
+                  ) { _, outputStatus in
+                      if supplied {
+                          outputStatus.pointee = .noDataNow
+                          return nil
+                      }
+                      supplied = true
+                      outputStatus.pointee = .haveData
+                      return input
+                  }
+                  guard status != .error,
+                        output.frameLength > 0,
+                        let samples = output.int16ChannelData?[0] else {
+                      return
+                  }
+                  let data = Data(
+                      bytes: samples,
+                      count: Int(output.frameLength) * MemoryLayout<Int16>.size
+                  )
+                  emitRealtimeAudio([
+                      "type": "chunk",
+                      "data": data.base64EncodedString(),
+                      "sampleRate": 24_000,
+                      "numChannels": 1,
+                      "samplesPerChannel": Int(output.frameLength),
+                  ])
+              }
+
+              func stopRealtimeAudio() {
+                  guard let engine = realtimeAudioEngine else { return }
+                  engine.inputNode.removeTap(onBus: 0)
+                  engine.stop()
+                  realtimeAudioEngine = nil
+                  realtimeAudioConverter = nil
+                  try? AVAudioSession.sharedInstance().setActive(
+                      false,
+                      options: .notifyOthersOnDeactivation
+                  )
+                  emitRealtimeAudio(["type": "stopped"])
+              }
+
+              func emitRealtimeAudio(_ detail: [String: Any]) {
+                  guard JSONSerialization.isValidJSONObject(detail),
+                        let data = try? JSONSerialization.data(
+                            withJSONObject: detail
+                        ),
+                        let json = String(data: data, encoding: .utf8) else {
+                      return
+                  }
+                  DispatchQueue.main.async { [weak self] in
+                      self?.realtimeWebView?.evaluateJavaScript(
+                          "window.dispatchEvent(new CustomEvent("
+                          + "'codex-mobile-realtime-audio',"
+                          + "{detail:\(json)}))"
+                      )
+                  }
+              }
+          }
+          '''.replace("\n          ", "\n")
           geolocation_prompt = "        context.coordinator.prepareWebGeolocationAuthorization()\n"
           if geolocation_prompt not in source:
               raise SystemExit("Pinned PakePlus geolocation hook changed")
@@ -337,6 +571,8 @@ jobs:
             -c 'Print :NSLocalNetworkUsageDescription' "$plist")"
           test -n "$(/usr/libexec/PlistBuddy \
             -c 'Print :NSCameraUsageDescription' "$plist")"
+          test -n "$(/usr/libexec/PlistBuddy \
+            -c 'Print :NSMicrophoneUsageDescription' "$plist")"
           if /usr/libexec/PlistBuddy \
             -c 'Print :NSAppTransportSecurity:NSAllowsArbitraryLoads' \
             "$plist" >/dev/null 2>&1; then
@@ -347,7 +583,11 @@ jobs:
             echo "::error::Release iOS host still enables developer extras"
             exit 1
           fi
-          grep -Fq 'decisionHandler(.deny)' PakePlus/WebView.swift
+          grep -Fq 'case .microphone:' PakePlus/WebView.swift
+          grep -Fq 'return .grant' PakePlus/WebView.swift
+          grep -Fq 'name: "realtimeAudio"' PakePlus/WebView.swift
+          grep -Fq 'AVAudioEngine' PakePlus/WebView.swift
+          grep -Fq 'codex-mobile-realtime-audio' PakePlus/WebView.swift
           if grep -Fq 'context.coordinator.prepareWebGeolocationAuthorization()' \
             PakePlus/WebView.swift; then
             echo "::error::Release iOS host still requests geolocation"
@@ -397,6 +637,8 @@ jobs:
             "$app/Info.plist")" = "false"
           test -n "$(/usr/libexec/PlistBuddy \
             -c 'Print :NSCameraUsageDescription' "$app/Info.plist")"
+          test -n "$(/usr/libexec/PlistBuddy \
+            -c 'Print :NSMicrophoneUsageDescription' "$app/Info.plist")"
           test "$(/usr/libexec/PlistBuddy \
             -c 'Print :NSAppTransportSecurity:NSAllowsLocalNetworking' \
             "$app/Info.plist")" = "true"

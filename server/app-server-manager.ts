@@ -27,7 +27,13 @@ export function resolveGatewayRuntimeConfig(
 }
 
 export function appServerCommand(port: number) {
-  return ["app-server", "--listen", `ws://127.0.0.1:${port}`];
+  return [
+    "app-server",
+    "--enable",
+    "realtime_conversation",
+    "--listen",
+    `ws://127.0.0.1:${port}`,
+  ];
 }
 
 export function appServerEnvironment(

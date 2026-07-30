@@ -355,6 +355,20 @@ button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; 
 .file-diff-line.meta { color: #777; background: #f5f5f5; }
 .file-diff-empty { padding: 24px; color: #888; text-align: center; font-size: 13px; }
 .composer-wrap { position: fixed; left: 50%; bottom: var(--browser-edge-bottom); transform: translateX(-50%); z-index: 4; width: min(100%, 720px); padding: 8px 22px 0; background: linear-gradient(transparent, #fff 17%, #fff); }
+.realtime-panel { margin: 0 8px 8px; overflow: hidden; border: 1px solid rgba(0,0,0,.06); border-radius: 22px; background: rgba(248,248,248,.98); box-shadow: 0 8px 28px rgba(0,0,0,.07); }
+.realtime-transcript { max-height: 112px; overflow-y: auto; padding: 12px 14px 4px; font-size: 14px; line-height: 1.45; }
+.realtime-transcript p { margin: 0 0 8px; }
+.realtime-transcript .user { color: #666; }
+.realtime-controls { min-height: 52px; display: flex; align-items: center; gap: 8px; padding: 8px 10px 10px 14px; }
+.realtime-controls > span { min-width: 0; flex: 1; display: flex; align-items: center; gap: 7px; }
+.realtime-controls strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.realtime-controls time { color: #777; font-variant-numeric: tabular-nums; font-size: 12px; }
+.realtime-controls button { border: 0; border-radius: 15px; background: #e8e8e8; padding: 8px 11px; font-weight: 650; }
+.realtime-controls .realtime-stop { background: #111; color: #fff; }
+.realtime-controls button:disabled { opacity: .45; }
+.realtime-pulse { width: 10px; height: 10px; flex: 0 0 auto; border-radius: 50%; background: #2388f5; box-shadow: 0 0 0 0 rgba(35,136,245,.28); animation: realtime-pulse 1.6s ease-out infinite; }
+@keyframes realtime-pulse { 55%,100% { box-shadow: 0 0 0 8px transparent; } }
+.realtime-error { display: block; width: calc(100% - 16px); margin: 0 8px 8px; border: 0; border-radius: 16px; background: #f5eeee; padding: 9px 12px; color: #8b2525; text-align: left; font-size: 13px; }
 .pending-steer-message { position: absolute; right: 22px; bottom: calc(100% + 3px); max-width: calc(100% - 44px); overflow: hidden; border-radius: 16px; background: rgba(239,239,239,.96); padding: 8px 13px; color: #555; box-shadow: 0 4px 16px rgba(0,0,0,.06); text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 1.35; pointer-events: none; animation: pending-steer-in .16s ease-out; }
 @keyframes pending-steer-in { from { opacity: 0; transform: translateY(4px); } }
 .draft-images { display: flex; gap: 8px; max-width: 100%; overflow-x: auto; padding: 17px 22px 9px 10px; scrollbar-width: none; }
