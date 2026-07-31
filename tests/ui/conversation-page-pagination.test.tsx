@@ -159,9 +159,9 @@ describe("会话详情历史分页", () => {
       undefined,
       { busy: true },
     );
-    expect(
-      within(idle.container).getByRole("button", { name: "停止" }),
-    ).not.toBeNull();
+    const stop = within(idle.container).getByRole("button", { name: "停止" });
+    expect(stop.classList.contains("send-button-running")).toBe(true);
+    expect(stop.getAttribute("aria-busy")).toBe("true");
     idle.unmount();
 
     const pending = renderConversation(
@@ -175,12 +175,14 @@ describe("会话详情历史分页", () => {
     expect(steering.getAttribute("disabled")).not.toBeNull();
   });
 
-  it("空闲已有会话且输入为空时显示实时语音入口", () => {
+  it("空闲已有会话且输入为空时隐藏实时语音入口", () => {
     const { container } = renderConversation("exhausted");
     const view = within(container);
 
-    expect(view.getByRole("button", { name: "开始实时语音" })).not.toBeNull();
-    expect(view.queryByRole("button", { name: "发送" })).toBeNull();
+    expect(view.queryByRole("button", { name: "开始实时语音" })).toBeNull();
+    expect(view.getByRole("button", { name: "发送" }).hasAttribute("disabled")).toBe(
+      true,
+    );
   });
 
   it("输入文字后仍显示原发送按钮，不改变文字提交", () => {

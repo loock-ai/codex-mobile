@@ -388,11 +388,19 @@ button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; 
 .composer textarea { border: 0; resize: none; outline: none; background: transparent; padding: 11px 7px; max-height: 120px; font-size: 16px; }
 .composer textarea:disabled { color: #888; opacity: .65; }
 .add-button, .send-button { border: 0; width: 42px; height: 42px; border-radius: 50%; background: transparent; display: grid; place-items: center; font-size: 32px; font-weight: 200; }
-.send-button { background: #111; color: #fff; }
+.send-button { position: relative; overflow: hidden; background: #111; color: #fff; }
+.send-button > svg, .send-button > i { position: relative; z-index: 1; }
+.send-button-running::before { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: conic-gradient(from 0deg, transparent 0deg 72deg, rgba(255,255,255,.08) 130deg, rgba(255,255,255,.28) 245deg, rgba(255,255,255,.72) 345deg, rgba(255,255,255,.24) 360deg); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 0); mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 0); animation: composer-running-spin 1s linear infinite; }
+@keyframes composer-running-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .send-button-running::before { animation: none; } }
 .composer-steer-spinner { width: 18px; height: 18px; border-color: rgba(255,255,255,.35); border-top-color: #fff; }
 .add-button:disabled, .send-button:disabled { opacity: .35; }
 .empty-state { color: #777; text-align: center; padding: 52px 10px; }
-.error-banner { position: fixed; left: 50%; bottom: 110px; transform: translateX(-50%); width: min(calc(100% - 44px), 676px); background: #fff0ee; color: #9c2b20; padding: 12px 16px; border-radius: 14px; z-index: 5; }
+.error-banner { position: fixed; left: 50%; bottom: 110px; transform: translateX(-50%); z-index: 5; width: min(calc(100% - 44px), 676px); border-radius: 16px; background: #fff0ee; color: #9c2b20; display: grid; grid-template-columns: minmax(0,1fr) 36px; align-items: center; gap: 8px; padding: 8px 8px 8px 16px; box-shadow: 0 7px 24px rgba(83,18,13,.08); }
+.error-banner > span { min-width: 0; overflow-wrap: anywhere; line-height: 1.4; }
+.error-banner > button { width: 36px; height: 36px; border: 0; border-radius: 50%; background: transparent; color: currentColor; display: grid; place-items: center; padding: 0; }
+.error-banner > button:active { background: rgba(156,43,32,.08); }
+.error-banner > button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .notice-banner { position: fixed; z-index: 24; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 112px); transform: translateX(-50%); border-radius: 22px; background: rgba(17,17,17,.92); color: #fff; padding: 10px 16px; box-shadow: 0 8px 24px rgba(0,0,0,.16); font-size: 13px; }
 .conversation-action-dismiss { position: fixed; inset: 0; z-index: 6; border: 0; background: transparent; }
 .conversation-action-menu { position: fixed; z-index: 7; top: calc(var(--safe-area-top) + 76px); left: 50%; width: min(calc(100% - 36px), 520px); transform: translateX(-50%); overflow: hidden; border-radius: 27px; background: rgba(255,255,255,.98); box-shadow: 0 18px 48px rgba(0,0,0,.16); padding: 14px; backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }

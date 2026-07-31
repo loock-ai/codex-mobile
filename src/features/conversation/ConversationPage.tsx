@@ -21,6 +21,7 @@ import {
 } from "../../ui/app-display";
 import { effortLabel } from "../../ui/settings";
 import { groupConversationTurns } from "../../ui/conversation";
+import { ErrorBanner } from "../../ui/ErrorBanner";
 import { TurnCard } from "./Timeline";
 import {
   ContextUsageButton,
@@ -207,8 +208,6 @@ export function ConversationPage({
   const realtimeActive = ["connecting", "listening", "stopping"].includes(
     realtime.state.status,
   );
-  const showRealtimeEntry =
-    !isNewChat && !busy && !hasDraft && !realtimeActive;
   const {
     scrollRef,
     contentRef,
@@ -427,7 +426,7 @@ export function ConversationPage({
           </div>
         </div>
       </div>
-      {error && <div className="error-banner" role="alert">{error}</div>}
+      <ErrorBanner message={error} />
       <form
         className="composer-wrap"
         aria-busy={imageReading}
@@ -445,16 +444,6 @@ export function ConversationPage({
             onToggleMute={realtime.toggleMute}
             onStop={() => void realtime.stop()}
           />
-        )}
-        {realtime.state.status === "error" && (
-          <button
-            type="button"
-            className="realtime-error"
-            role="alert"
-            onClick={realtime.dismissError}
-          >
-            {realtime.state.error}，点击关闭
-          </button>
         )}
         {pendingSteerText && (
           <div
@@ -562,21 +551,16 @@ export function ConversationPage({
             rows={1}
           />
           <button
-            type={
-              showRealtimeEntry || (busy && !canSteer) ? "button" : "submit"
-            }
+            type={busy && !canSteer ? "button" : "submit"}
             onClick={
-              showRealtimeEntry
-                ? () => void realtime.start()
-                : busy && !canSteer
-                  ? onInterrupt
-                  : undefined
+              busy && !canSteer ? onInterrupt : undefined
             }
-            className="send-button"
+            className={`send-button${
+              busy && !canSteer ? " send-button-running" : ""
+            }`}
+            aria-busy={busy && !canSteer}
             aria-label={
-              showRealtimeEntry
-                ? "开始实时语音"
-                : steering
+              steering
                 ? "正在引导"
                 : canSteer
                   ? "引导"
@@ -586,15 +570,12 @@ export function ConversationPage({
             }
             disabled={
               !interactive ||
-              (showRealtimeEntry && !client) ||
               steering ||
               (canSteer && imageReading) ||
-              (!busy && !showRealtimeEntry && (imageReading || !hasDraft))
+              (!busy && (imageReading || !hasDraft))
             }
           >
-            {showRealtimeEntry ? (
-              <AppIcon name="microphone" />
-            ) : steering ? (
+            {steering ? (
               <i className="action-spinner composer-steer-spinner" />
             ) : (
               <AppIcon name={busy && !canSteer ? "stop" : "send"} />

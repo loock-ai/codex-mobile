@@ -7,6 +7,7 @@ import {
   titleOf,
   type ThreadListState,
 } from "../../ui/app-display";
+import { ErrorBanner } from "../../ui/ErrorBanner";
 import type {
   BackendConfig,
   BackendRuntimeSummary,
@@ -331,7 +332,7 @@ export function ThreadListPage({
           <div className="empty-state">无法加载会话</div>
         )}
       </div>
-      {error && <div className="error-banner" role="alert">{error}</div>}
+      <ErrorBanner message={error} />
       <footer className="list-actions">
         <label className="search-box"><AppIcon name="search" /><input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索聊天" /></label>
         <button

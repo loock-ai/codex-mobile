@@ -167,6 +167,14 @@ describe("悬浮状态布局", () => {
     );
   });
 
+  it("任务运行时的停止按钮显示旋转光带并尊重减少动态效果设置", () => {
+    expect(styles).toContain(".send-button-running::before");
+    expect(styles).toContain("animation: composer-running-spin");
+    expect(styles).toContain(
+      "@media (prefers-reduced-motion: reduce) { .send-button-running::before { animation: none; } }",
+    );
+  });
+
   it("App 下载进度条使用中性灰而不是绿色", () => {
     const progressRule =
       styles.match(
