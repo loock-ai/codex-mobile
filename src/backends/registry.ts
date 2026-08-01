@@ -2,6 +2,7 @@ import type {
   BackendConfig,
   BackendRegistry,
 } from "./types";
+import { t } from "../i18n";
 
 export const BACKEND_REGISTRY_STORAGE_KEY =
   "codex-mobile.backend-registry.v1";
@@ -12,25 +13,25 @@ export function parseBackendGatewayUrl(value: string) {
   try {
     url = new URL(value.trim());
   } catch {
-    throw new Error("网关地址无效");
+    throw new Error(t("网关地址无效"));
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("网关地址仅支持 HTTP 或 HTTPS");
+    throw new Error(t("网关地址仅支持 HTTP 或 HTTPS"));
   }
   if (url.username || url.password) {
-    throw new Error("网关地址不能包含用户名或密码");
+    throw new Error(t("网关地址不能包含用户名或密码"));
   }
   if ((url.pathname && url.pathname !== "/") || url.hash) {
-    throw new Error("网关地址不能包含路径或锚点");
+    throw new Error(t("网关地址不能包含路径或锚点"));
   }
   const unsupportedParameters = [...url.searchParams.keys()].filter(
     (key) => key !== "token",
   );
   if (unsupportedParameters.length) {
-    throw new Error("网关地址仅支持 token 查询参数");
+    throw new Error(t("网关地址仅支持 token 查询参数"));
   }
   if (url.searchParams.getAll("token").length > 1) {
-    throw new Error("网关地址只能包含一个 token");
+    throw new Error(t("网关地址只能包含一个 token"));
   }
   return {
     baseUrl: url.origin,
@@ -49,20 +50,20 @@ export function normalizeBackendBaseUrl(value: string) {
   try {
     url = new URL(value.trim());
   } catch {
-    throw new Error("后端地址无效");
+    throw new Error(t("后端地址无效"));
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("后端地址仅支持 HTTP 或 HTTPS");
+    throw new Error(t("后端地址仅支持 HTTP 或 HTTPS"));
   }
   if (
     (url.pathname && url.pathname !== "/") ||
     url.search ||
     url.hash
   ) {
-    throw new Error("后端地址不能包含路径、查询参数或锚点");
+    throw new Error(t("后端地址不能包含路径、查询参数或锚点"));
   }
   if (url.username || url.password) {
-    throw new Error("后端地址不能包含用户名或密码");
+    throw new Error(t("后端地址不能包含用户名或密码"));
   }
   return url.origin;
 }
@@ -288,7 +289,7 @@ export function upsertBackend(
         index !== existingIndex && backend.baseUrl === baseUrl,
     )
   ) {
-    throw new Error("后端地址已存在");
+    throw new Error(t("后端地址已存在"));
   }
   const hostId = value.hostId?.trim();
   if (
@@ -298,10 +299,10 @@ export function upsertBackend(
         index !== existingIndex && backend.hostId === hostId,
     )
   ) {
-    throw new Error("设备身份已存在");
+    throw new Error(t("设备身份已存在"));
   }
   if (existingIndex < 0 && registry.backends.length >= MAX_BACKENDS) {
-    throw new Error(`最多只能保存 ${MAX_BACKENDS} 个后端`);
+    throw new Error(t("最多只能保存 {count} 个后端", { count: MAX_BACKENDS }));
   }
   const next: BackendConfig = {
     id: value.id.trim(),
@@ -312,7 +313,7 @@ export function upsertBackend(
     enabled: value.enabled,
     order: value.order,
   };
-  if (!next.id) throw new Error("后端 ID 不能为空");
+  if (!next.id) throw new Error(t("后端 ID 不能为空"));
   const backends =
     existingIndex >= 0
       ? registry.backends.map((backend, index) =>
@@ -365,7 +366,7 @@ export function setBackendEnabled(
       (backend) => backend.id !== backendId && backend.enabled,
     )
   ) {
-    throw new Error("至少保留一个已启用设备");
+    throw new Error(t("至少保留一个已启用设备"));
   }
   return withValidSelection(
     registry,
@@ -383,7 +384,7 @@ export function removeBackend(
     return registry;
   }
   if (registry.backends.length <= 1) {
-    throw new Error("至少保留一个设备");
+    throw new Error(t("至少保留一个设备"));
   }
   const backends = registry.backends.filter(
     (backend) => backend.id !== backendId,

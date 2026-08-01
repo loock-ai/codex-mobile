@@ -22,6 +22,7 @@ import type {
   BackendRuntimeSummary,
 } from "../../backends/types";
 import { ActionSheet } from "../../ui/ActionSheet";
+import { t, useI18n } from "../../i18n";
 import { GatewayQrScannerSheet } from "./GatewayQrScannerSheet";
 
 interface BackendDraft {
@@ -67,6 +68,7 @@ export function BackendManagerSheet({
   probe?: (backend: BackendConfig) => Promise<GatewayHostInfo>;
   scanQrCode?: () => Promise<string>;
 }) {
+  const { preference, setPreference } = useI18n();
   const [draft, setDraft] = useState<BackendDraft | null>(() =>
     open && !registry.backends.length ? newBackendDraft(0) : null,
   );
@@ -88,7 +90,7 @@ export function BackendManagerSheet({
   const applyScannedGateway = useCallback((value: string) => {
     try {
       const gateway = parseBackendGatewayUrl(value);
-      if (!gateway.token) throw new Error("二维码中缺少访问口令");
+      if (!gateway.token) throw new Error(t("二维码中缺少访问口令"));
       setDraft((current) =>
         current
           ? {
@@ -104,8 +106,8 @@ export function BackendManagerSheet({
     } catch (reason) {
       setError(
         reason instanceof Error
-          ? `二维码无效：${reason.message}`
-          : "二维码不是有效的网关链接",
+          ? t("二维码无效：{message}", { message: reason.message })
+          : t("二维码不是有效的网关链接"),
       );
     } finally {
       setQrScannerOpen(false);
@@ -121,7 +123,7 @@ export function BackendManagerSheet({
       applyScannedGateway(await scanQrCode());
     } catch (reason) {
       setError(
-        reason instanceof Error ? reason.message : "未能识别二维码",
+        reason instanceof Error ? reason.message : t("未能识别二维码"),
       );
     }
   };
@@ -154,7 +156,7 @@ export function BackendManagerSheet({
       };
       const host = await probe(candidate);
       const hostId = host.hostId.trim();
-      if (!hostId) throw new Error("设备身份响应无效");
+      if (!hostId) throw new Error(t("设备身份响应无效"));
       const next = upsertBackend(registry, {
         ...candidate,
         hostId,
@@ -174,7 +176,9 @@ export function BackendManagerSheet({
     if (
       (summary?.busy || summary?.approvalCount) &&
       !window.confirm(
-        `${backend.name} 仍有运行任务或待审批请求，确定删除吗？`,
+        t("{name} 仍有运行任务或待审批请求，确定删除吗？", {
+          name: backend.name,
+        }),
       )
     ) {
       return;
@@ -185,32 +189,32 @@ export function BackendManagerSheet({
   return (
     <>
       <ActionSheet
-      title={draft ? "设备连接" : "管理设备"}
-      onClose={onClose}
-      closeLabel="关闭"
-      closeOnBackdrop={false}
-      className="backend-manager-sheet"
-      backdropClassName="backend-manager-backdrop"
-    >
+        title={draft ? t("设备连接") : t("管理设备")}
+        onClose={onClose}
+        closeLabel={t("关闭")}
+        closeOnBackdrop={false}
+        className="backend-manager-sheet"
+        backdropClassName="backend-manager-backdrop"
+      >
         {draft ? (
           <form className="backend-form" onSubmit={submit}>
             <label>
-              <span>设备名称</span>
+              <span>{t("设备名称")}</span>
               <input
-                aria-label="设备名称"
+                aria-label={t("设备名称")}
                 value={draft.name}
-                placeholder="例如 Mac mini"
+                placeholder={t("例如 Mac mini")}
                 onChange={(event) =>
                   setDraft({ ...draft, name: event.target.value })
                 }
               />
             </label>
             <div className="backend-form-field">
-              <label htmlFor="backend-gateway-url">网关地址</label>
+              <label htmlFor="backend-gateway-url">{t("网关地址")}</label>
               <div className="backend-gateway-input">
                 <input
                   id="backend-gateway-url"
-                  aria-label="网关地址"
+                  aria-label={t("网关地址")}
                   inputMode="url"
                   value={draft.gatewayUrl}
                   placeholder="http://host.local:18766/?token=xxx"
@@ -220,7 +224,7 @@ export function BackendManagerSheet({
                 />
                 <button
                   type="button"
-                  aria-label="扫描网关二维码"
+                  aria-label={t("扫描网关二维码")}
                   onClick={() => void openQrScanner()}
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -240,10 +244,10 @@ export function BackendManagerSheet({
                   setError("");
                 }}
               >
-                取消
+                {t("取消")}
               </button>
               <button type="submit" disabled={testing}>
-                {testing ? "正在测试…" : "测试并保存"}
+                {testing ? t("正在测试…") : t("测试并保存")}
               </button>
             </div>
           </form>
@@ -264,20 +268,22 @@ export function BackendManagerSheet({
                       <small>{backend.baseUrl}</small>
                       <span>
                         {!backend.enabled
-                          ? "已暂停"
+                          ? t("已暂停")
                           : summary?.busy
-                            ? "任务进行中"
+                            ? t("任务进行中")
                             : summary?.approvalCount
-                              ? `${summary.approvalCount} 个待审批`
+                              ? t("{count} 个待审批", {
+                                  count: summary.approvalCount,
+                                })
                               : summary?.connection === "online"
-                                ? "已连接"
-                                : "未连接"}
+                                ? t("已连接")
+                                : t("未连接")}
                       </span>
                     </div>
                     <div className="backend-row-actions">
                       <button
                         type="button"
-                        aria-label={`上移 ${backend.name}`}
+                        aria-label={t("上移 {name}", { name: backend.name })}
                         disabled={index === 0}
                         onClick={() =>
                           updateRegistry(() =>
@@ -289,7 +295,7 @@ export function BackendManagerSheet({
                       </button>
                       <button
                         type="button"
-                        aria-label={`下移 ${backend.name}`}
+                        aria-label={t("下移 {name}", { name: backend.name })}
                         disabled={index === registry.backends.length - 1}
                         onClick={() =>
                           updateRegistry(() =>
@@ -301,7 +307,7 @@ export function BackendManagerSheet({
                       </button>
                       <button
                         type="button"
-                        aria-label={`编辑 ${backend.name}`}
+                        aria-label={t("编辑 {name}", { name: backend.name })}
                         onClick={() => {
                           setDraft({
                             id: backend.id,
@@ -316,11 +322,14 @@ export function BackendManagerSheet({
                           setError("");
                         }}
                       >
-                        编辑
+                        {t("编辑")}
                       </button>
                       <button
                         type="button"
-                        aria-label={`${backend.enabled ? "暂停" : "启用"} ${backend.name}`}
+                        aria-label={t(
+                          backend.enabled ? "暂停 {name}" : "启用 {name}",
+                          { name: backend.name },
+                        )}
                         onClick={() =>
                           updateRegistry(() =>
                             setBackendEnabled(
@@ -331,14 +340,14 @@ export function BackendManagerSheet({
                           )
                         }
                       >
-                        {backend.enabled ? "暂停" : "启用"}
+                        {backend.enabled ? t("暂停") : t("启用")}
                       </button>
                       <button
                         type="button"
-                        aria-label={`删除 ${backend.name}`}
+                        aria-label={t("删除 {name}", { name: backend.name })}
                         onClick={() => deleteBackend(backend)}
                       >
-                        删除
+                        {t("删除")}
                       </button>
                     </div>
                   </article>
@@ -349,19 +358,39 @@ export function BackendManagerSheet({
             <button
               type="button"
               className="backend-add-device"
-              aria-label="添加设备"
+              aria-label={t("添加设备")}
               onClick={() => {
                 setDraft(newBackendDraft(registry.backends.length));
                 setError("");
               }}
             >
-              ＋ 添加设备
+              ＋ {t("添加设备")}
             </button>
+            <section className="backend-language-settings" aria-label={t("语言")}>
+              <strong>{t("语言")}</strong>
+              <div role="group" aria-label={t("语言")}>
+                {([
+                  ["system", "跟随系统"],
+                  ["zh-CN", "中文"],
+                  ["en", "英文"],
+                ] as const).map(([value, label]) => (
+                  <button
+                    type="button"
+                    key={value}
+                    className={preference === value ? "selected" : ""}
+                    aria-pressed={preference === value}
+                    onClick={() => setPreference(value)}
+                  >
+                    {t(label)}
+                  </button>
+                ))}
+              </div>
+            </section>
             {appUpdate?.supported && (
-              <section className="backend-app-update" aria-label="应用更新">
+              <section className="backend-app-update" aria-label={t("应用更新")}>
                 <div>
                   <strong>Codex Mobile</strong>
-                  <small>当前版本 v{appUpdate.currentVersion}</small>
+                  <small>{t("当前版本 v{version}", { version: appUpdate.currentVersion })}</small>
                   {appUpdate.status && <small>{appUpdate.status}</small>}
                 </div>
                 <button
@@ -369,7 +398,7 @@ export function BackendManagerSheet({
                   disabled={appUpdate.checking}
                   onClick={appUpdate.onCheck}
                 >
-                  {appUpdate.checking ? "正在检查…" : "检查更新"}
+                  {appUpdate.checking ? t("正在检查…") : t("检查更新")}
                 </button>
               </section>
             )}

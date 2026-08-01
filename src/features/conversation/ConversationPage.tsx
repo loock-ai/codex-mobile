@@ -31,6 +31,7 @@ import {
 import { ImagePreviewSheet } from "./sheets/ImagePreviewSheet";
 import { useConversationAutoScroll } from "./conversation-scroll";
 import { useRealtimeConversation } from "./useRealtimeConversation";
+import { t } from "../../i18n";
 
 export type ConversationLoadState = "idle" | "loading" | "ready" | "error";
 
@@ -66,16 +67,16 @@ function RealtimeControls({
   }, []);
   const statusLabel =
     status === "connecting"
-      ? "正在连接"
+      ? t("正在连接")
       : status === "stopping"
-        ? "正在结束"
+        ? t("正在结束")
         : muted
-          ? "已静音"
+          ? t("已静音")
           : assistantTranscript
-            ? "Codex 正在回复"
-            : "正在聆听";
+            ? t("Codex 正在回复")
+            : t("正在聆听");
   return (
-    <section className="realtime-panel" aria-label="实时语音控制">
+    <section className="realtime-panel" aria-label={t("实时语音控制")}>
       {(userTranscript || assistantTranscript) && (
         <div className="realtime-transcript" aria-live="polite">
           {userTranscript && <p className="user">{userTranscript}</p>}
@@ -93,7 +94,7 @@ function RealtimeControls({
           disabled={status !== "listening"}
           onClick={onToggleMute}
         >
-          {muted ? "恢复" : "静音"}
+          {muted ? t("恢复") : t("静音")}
         </button>
         <button
           type="button"
@@ -101,7 +102,7 @@ function RealtimeControls({
           disabled={status === "stopping"}
           onClick={onStop}
         >
-          结束
+          {t("结束")}
         </button>
       </div>
     </section>
@@ -242,7 +243,7 @@ export function ConversationPage({
       <header className="conversation-header">
         <button
           className="round-button"
-          aria-label="打开会话列表"
+          aria-label={t("打开会话列表")}
           onClick={onBack}
         >
           <AppIcon name="menu" />
@@ -251,15 +252,15 @@ export function ConversationPage({
           <strong>{titleOf(active)}</strong>
           <span>
             <i className={`status-dot ${connection}`} />
-            {backendName} · {active.cwd?.split("/").pop() || "未选择项目"} ·{" "}
-            {connection === "online" ? "已连接" : "连接中"}
+            {backendName} · {active.cwd?.split("/").pop() || t("未选择项目")} ·{" "}
+            {connection === "online" ? t("已连接") : t("连接中")}
           </span>
         </div>
         {!!active.id && (
           <div
             className="conversation-header-actions"
             role="group"
-            aria-label="会话详情操作"
+            aria-label={t("会话详情操作")}
           >
             <ContextUsageButton
               tokenUsage={tokenUsage}
@@ -271,7 +272,7 @@ export function ConversationPage({
             <button
               className="round-button"
               type="button"
-              aria-label="会话操作"
+              aria-label={t("会话操作")}
               aria-expanded={actionsOpen}
               onClick={() => {
                 setStatusOpen(false);
@@ -319,20 +320,20 @@ export function ConversationPage({
       >
         <div className="conversation-scroll-content" ref={contentRef}>
           {isNewChat && (
-            <section className="new-chat-targets" aria-label="新聊天目标">
-              <h2>开始处理</h2>
+            <section className="new-chat-targets" aria-label={t("新聊天目标")}>
+              <h2>{t("开始处理")}</h2>
               <label>
                 <AppIcon name="folder" />
                 <span>
-                  <small>项目</small>
+                  <small>{t("项目")}</small>
                   <strong>
                     {projectOptions.find(
                       (project) => project.cwd === active.cwd,
-                    )?.name ?? "请选择项目"}
+                    )?.name ?? t("请选择项目")}
                   </strong>
                 </span>
                 <select
-                  aria-label="选择项目"
+                  aria-label={t("选择项目")}
                   value={active.cwd ?? ""}
                   disabled={!projectOptions.length}
                   onChange={(event) =>
@@ -340,7 +341,7 @@ export function ConversationPage({
                   }
                 >
                   {!projectOptions.length && (
-                    <option value="">没有可用项目</option>
+                    <option value="">{t("没有可用项目")}</option>
                   )}
                   {projectOptions.map((project) => (
                     <option value={project.cwd} key={project.cwd}>
@@ -352,11 +353,11 @@ export function ConversationPage({
               <label>
                 <span className="device-glyph" aria-hidden="true">▰</span>
                 <span>
-                  <small>机器</small>
+                  <small>{t("机器")}</small>
                   <strong>{backendName}</strong>
                 </span>
                 <select
-                  aria-label="选择机器"
+                  aria-label={t("选择机器")}
                   value={backendId}
                   onChange={(event) =>
                     onNewChatBackendChange(event.currentTarget.value)
@@ -370,7 +371,7 @@ export function ConversationPage({
                 </select>
               </label>
               {!projectOptions.length && (
-                <p role="alert">没有可用项目，暂时无法启动新聊天。</p>
+                <p role="alert">{t("没有可用项目，暂时无法启动新聊天。")}</p>
               )}
             </section>
           )}
@@ -381,13 +382,13 @@ export function ConversationPage({
                 className="older-turns-control"
                 onClick={requestOlderTurns}
               >
-                加载更早消息
+                {t("加载更早消息")}
               </button>
             )}
             {loadState === "ready" && olderTurnsState === "loading" && (
               <div className="older-turns-status" role="status">
                 <i className="action-spinner" aria-hidden="true" />
-                正在加载更早消息
+                {t("正在加载更早消息")}
               </div>
             )}
             {loadState === "ready" && olderTurnsState === "error" && (
@@ -396,22 +397,22 @@ export function ConversationPage({
                 className="older-turns-control error"
                 onClick={requestOlderTurns}
               >
-                加载失败，点击重试
+                {t("加载失败，点击重试")}
               </button>
             )}
             {loadState === "loading" ? (
               <div
                 className="conversation-skeleton"
                 role="status"
-                aria-label="正在加载会话详情"
+                aria-label={t("正在加载会话详情")}
               >
                 {Array.from({ length: 7 }, (_, index) => <i key={index} />)}
               </div>
             ) : loadState === "error" ? (
               <div className="conversation-load-error" role="alert">
-                <strong>无法加载会话</strong>
-                <p>{loadError || "请检查连接后重试。"}</p>
-                <button type="button" onClick={onRetry}>重试</button>
+                <strong>{t("无法加载会话")}</strong>
+                <p>{loadError || t("请检查连接后重试。")}</p>
+                <button type="button" onClick={onRetry}>{t("重试")}</button>
               </div>
             ) : turns.length ? turns.map((turn: DisplayRecord, index: number) => (
               <TurnCard
@@ -421,7 +422,7 @@ export function ConversationPage({
                 client={client}
               />
             )) : !isNewChat && (
-              <div className="empty-state">开始一次新的 Codex 对话</div>
+              <div className="empty-state">{t("开始一次新的 Codex 对话")}</div>
             )}
           </div>
         </div>
@@ -449,28 +450,28 @@ export function ConversationPage({
           <div
             className="pending-steer-message"
             role="status"
-            aria-label="已发送引导"
+            aria-label={t("已发送引导")}
             title={pendingSteerText}
           >
             {pendingSteerText}
           </div>
         )}
         {draftImages.length > 0 && (
-          <div className="draft-images" aria-label="待发送图片">
+          <div className="draft-images" aria-label={t("待发送图片")}>
             {draftImages.map((image) => (
               <figure key={image.id}>
                 <button
                   type="button"
                   className="draft-image-preview"
-                  aria-label={`预览 ${image.name}`}
+                  aria-label={t("预览 {name}", { name: image.name })}
                   onClick={() => setPreviewImage(image)}
                 >
-                  <img src={image.url} alt={`待发送 ${image.name}`} />
+                  <img src={image.url} alt={t("待发送 {name}", { name: image.name })} />
                 </button>
                 <button
                   type="button"
                   className="draft-image-remove"
-                  aria-label={`移除 ${image.name}`}
+                  aria-label={t("移除 {name}", { name: image.name })}
                   onClick={() => onRemoveImage(image.id)}
                 >
                   <span aria-hidden="true">×</span>
@@ -483,19 +484,19 @@ export function ConversationPage({
           <ImagePreviewSheet
             src={previewImage.url}
             name={previewImage.name}
-            alt={`待发送 ${previewImage.name}`}
+            alt={t("待发送 {name}", { name: previewImage.name })}
             onClose={() => setPreviewImage(null)}
           />
         )}
         {imageReading && (
           <div className="draft-image-reading" role="status" aria-live="polite">
-            正在读取图片…
+            {t("正在读取图片…")}
           </div>
         )}
         <div className="chips">
           <button
             type="button"
-            aria-label="选择模型、智能与速度"
+            aria-label={t("选择模型、智能与速度")}
             disabled={!interactive}
             onClick={onOpenAgentSettings}
           >
@@ -504,7 +505,7 @@ export function ConversationPage({
           </button>
           <button
             type="button"
-            aria-label="选择审批与权限模式"
+            aria-label={t("选择审批与权限模式")}
             disabled={!interactive}
             onClick={onOpenPermissionSettings}
           >
@@ -518,7 +519,7 @@ export function ConversationPage({
             type="file"
             accept="image/png,image/jpeg,image/webp,image/gif"
             multiple
-            aria-label="选择图片"
+            aria-label={t("选择图片")}
             onChange={(event) => {
               const input = event.currentTarget;
               void onSelectImages(input.files).finally(() => {
@@ -529,7 +530,7 @@ export function ConversationPage({
           <button
             type="button"
             className="add-button"
-            aria-label="添加附件"
+            aria-label={t("添加附件")}
             disabled={
               !interactive ||
               realtimeActive ||
@@ -543,11 +544,11 @@ export function ConversationPage({
             ＋
           </button>
           <textarea
-            aria-label="向 Codex 提问"
+            aria-label={t("向 Codex 提问")}
             value={draft}
             disabled={!interactive || steering || realtimeActive}
             onChange={(event) => onDraftChange(event.target.value)}
-            placeholder="向 Codex 提问"
+            placeholder={t("向 Codex 提问")}
             rows={1}
           />
           <button
@@ -561,12 +562,12 @@ export function ConversationPage({
             aria-busy={busy && !canSteer}
             aria-label={
               steering
-                ? "正在引导"
+                ? t("正在引导")
                 : canSteer
-                  ? "引导"
+                  ? t("引导")
                   : busy
-                    ? "停止"
-                    : "发送"
+                    ? t("停止")
+                    : t("发送")
             }
             disabled={
               !interactive ||

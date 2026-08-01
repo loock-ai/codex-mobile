@@ -1,4 +1,5 @@
 import { Chevron } from "../../ui/icons";
+import { t } from "../../i18n";
 import {
   modelOptionMeta,
   type ModelCatalogEntry,
@@ -55,18 +56,18 @@ export function ComposerSettings({
         className={`composer-popover ${picker === "permission" ? "permission-popover" : ""}`}
         aria-label={
           picker === "permission"
-            ? "权限模式"
+            ? t("权限模式")
             : picker === "model"
-              ? "模型"
+              ? t("模型")
               : picker === "speed"
-                ? "速度"
-                : "智能"
+                ? t("速度")
+                : t("智能")
         }
         onClick={(event) => event.stopPropagation()}
       >
         {picker === "agent" && (
           <>
-            <div className="popover-eyebrow">智能</div>
+            <div className="popover-eyebrow">{t("智能")}</div>
             <div className="popover-options effort-options">
               {effortOptions.map((option) => {
                 const selected = option.id === selectedEffort;
@@ -91,11 +92,11 @@ export function ComposerSettings({
             </div>
             <div className="popover-divider" />
             <button className="popover-link" onClick={() => onPickerChange("model")}>
-              <span><strong>模型</strong><small>{selectedModelLabel}</small></span>
+              <span><strong>{t("模型")}</strong><small>{selectedModelLabel}</small></span>
               <Chevron />
             </button>
             <button className="popover-link" onClick={() => onPickerChange("speed")}>
-              <span><strong>速度</strong><small>{selectedSpeedLabel}</small></span>
+              <span><strong>{t("速度")}</strong><small>{selectedSpeedLabel}</small></span>
               <Chevron />
             </button>
           </>
@@ -103,11 +104,11 @@ export function ComposerSettings({
         {picker === "model" && (
           <>
             <button className="popover-title" onClick={() => onPickerChange("agent")}>
-              <span><strong>模型</strong><small>{selectedModelLabel}</small></span>
+              <span><strong>{t("模型")}</strong><small>{selectedModelLabel}</small></span>
               <Chevron direction="down" />
             </button>
             <div className="popover-divider" />
-            <div className="popover-options model-options" aria-label="模型列表">
+            <div className="popover-options model-options" aria-label={t("模型列表")}>
               {models.map((option) => {
                 const value = option.model;
                 const selected = value === selectedModel;
@@ -136,11 +137,11 @@ export function ComposerSettings({
         {picker === "speed" && (
           <>
             <button className="popover-title" onClick={() => onPickerChange("agent")}>
-              <span><strong>速度</strong><small>{selectedSpeedLabel}</small></span>
+              <span><strong>{t("速度")}</strong><small>{selectedSpeedLabel}</small></span>
               <Chevron direction="down" />
             </button>
             <div className="popover-divider" />
-            <div className="popover-options" aria-label="速度列表">
+            <div className="popover-options" aria-label={t("速度列表")}>
               {speedOptions.map((option) => {
                 const selected = option.id === selectedServiceTier;
                 return (

@@ -1,4 +1,5 @@
 import { titleOf, type DisplayRecord } from "../../ui/app-display";
+import { t } from "../../i18n";
 
 export interface ThreadSource {
   id: string;
@@ -25,7 +26,7 @@ export interface ProjectThreadGroup {
 export function projectNameOf(thread: DisplayRecord) {
   const cwd = typeof thread.cwd === "string" ? thread.cwd.trim() : "";
   const normalized = cwd.replace(/\/+$/, "");
-  return normalized.split("/").filter(Boolean).at(-1) || "未识别项目";
+  return normalized.split("/").filter(Boolean).at(-1) || t("未识别项目");
 }
 
 function threadTimestamp(thread: DisplayRecord) {

@@ -3,7 +3,7 @@ export type ThreadListState = "loading" | "ready" | "error";
 export type DisplayRecord = Record<string, any>;
 
 export function titleOf(thread: DisplayRecord) {
-  return thread.name || thread.preview || "新对话";
+  return thread.name || thread.preview || t("新对话");
 }
 
 export function AppIcon({
@@ -47,3 +47,4 @@ export function AppIcon({
   };
   return <svg viewBox="0 0 24 24" aria-hidden="true" data-icon={name}>{paths[name]}</svg>;
 }
+import { t } from "../i18n";

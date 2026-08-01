@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { AppIcon } from "./app-display";
+import { t } from "../i18n";
 
 export async function copyText(text: string) {
   try {
@@ -131,7 +132,7 @@ export function CopyButton({
       </button>
       {status !== "idle" && (
         <small role="status">
-          {status === "copied" ? "已复制" : "复制失败"}
+          {status === "copied" ? t("已复制") : t("复制失败")}
         </small>
       )}
     </span>

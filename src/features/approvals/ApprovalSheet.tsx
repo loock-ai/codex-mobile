@@ -1,5 +1,6 @@
 import type { RpcMessage } from "../../app-server/client";
 import { ActionSheet } from "../../ui/ActionSheet";
+import { t } from "../../i18n";
 
 type AnyRecord = Record<string, any>;
 
@@ -19,17 +20,17 @@ export function ApprovalSheet({
   if (!approval) return null;
   const requestsInput = approval.method === "item/tool/requestUserInput";
   const title = requestsInput
-    ? "Codex 需要你的回答"
+    ? t("Codex 需要你的回答")
     : approval.method?.includes("fileChange")
-      ? "允许修改文件？"
+      ? t("允许修改文件？")
       : approval.method?.includes("permissions")
-        ? "授予附加权限？"
-        : "允许运行此操作？";
+        ? t("授予附加权限？")
+        : t("允许运行此操作？");
   return (
     <ActionSheet
       title={
         <div>
-          <small>需要你的确认</small>
+          <small>{t("需要你的确认")}</small>
           <h2>{title}</h2>
         </div>
       }
@@ -40,13 +41,13 @@ export function ApprovalSheet({
       footer={
         requestsInput ? (
           <button className="approve" onClick={onSubmitAnswers}>
-            提交回答
+            {t("提交回答")}
           </button>
         ) : (
           <>
-            <button onClick={() => onDecision("decline")}>拒绝</button>
+            <button onClick={() => onDecision("decline")}>{t("拒绝")}</button>
             <button className="approve" onClick={() => onDecision("accept")}>
-              允许
+              {t("允许")}
             </button>
           </>
         )
@@ -60,7 +61,7 @@ export function ApprovalSheet({
                 <span>{question.question}</span>
                 {question.options?.length ? (
                   <select value={userAnswers[question.id] ?? ""} onChange={(event) => onAnswerChange(question.id, event.target.value)}>
-                    <option value="">请选择</option>
+                    <option value="">{t("请选择")}</option>
                     {question.options.map((option: AnyRecord) => <option key={option.label} value={option.label}>{option.label}</option>)}
                   </select>
                 ) : (

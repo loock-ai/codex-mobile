@@ -17,6 +17,7 @@ import {
   RealtimeAudioPlayback,
 } from "../../audio/realtime-audio";
 import { NATIVE_REALTIME_AUDIO_EVENT } from "../../audio/native-realtime-audio";
+import { t } from "../../i18n";
 
 export function useRealtimeConversation({
   client,
@@ -112,7 +113,7 @@ export function useRealtimeConversation({
           releaseAudio();
           dispatch({
             type: "error",
-            message: params.message || "实时会话发生错误",
+            message: params.message || t("实时会话发生错误"),
           });
           break;
         case "thread/realtime/closed":
@@ -162,7 +163,7 @@ export function useRealtimeConversation({
       }
       dispatch({
         type: "error",
-        message: detail.message || "原生麦克风启动失败",
+        message: detail.message || t("原生麦克风启动失败"),
       });
     };
     window.addEventListener(NATIVE_REALTIME_AUDIO_EVENT, handleNativeAudio);

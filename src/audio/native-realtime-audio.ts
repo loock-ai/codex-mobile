@@ -1,4 +1,5 @@
 import type { RealtimeAudioChunk } from "../app-server/realtime";
+import { t } from "../i18n";
 
 export const NATIVE_REALTIME_AUDIO_EVENT = "codex-mobile-realtime-audio";
 
@@ -97,7 +98,7 @@ export class NativeRealtimeAudioCapture {
 
   async open() {
     this.bridge = readNativeRealtimeAudioBridge();
-    if (!this.bridge) throw new Error("原生麦克风 Bridge 不可用");
+    if (!this.bridge) throw new Error(t("原生麦克风 Bridge 不可用"));
     window.addEventListener(NATIVE_REALTIME_AUDIO_EVENT, this.handleAudio);
     this.bridge.start();
   }

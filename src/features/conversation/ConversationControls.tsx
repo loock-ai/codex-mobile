@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { AppIcon, titleOf, type DisplayRecord } from "../../ui/app-display";
 import { ActionSheet } from "../../ui/ActionSheet";
+import { getActiveLocale, t } from "../../i18n";
 
 type AnyRecord = Record<string, any>;
 
@@ -57,15 +58,15 @@ export function sevenDayRateLimitView(
 }
 
 function formatCount(value: number) {
-  if (value >= 10_000) {
-    return `${Math.round(value / 10_000)}万`;
-  }
-  return new Intl.NumberFormat("zh-CN").format(value);
+  return new Intl.NumberFormat(getActiveLocale(), {
+    notation: value >= 10_000 ? "compact" : "standard",
+    maximumFractionDigits: 0,
+  }).format(value);
 }
 
 function formatResetTime(timestamp: number | null) {
   if (!timestamp) return "";
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat(getActiveLocale(), {
     year: "numeric",
     month: "numeric",
     day: "numeric",
@@ -87,7 +88,7 @@ export function ContextUsageButton({
     <button
       className="context-usage-button"
       type="button"
-      aria-label="查看上下文占用情况"
+      aria-label={t("查看上下文占用情况")}
       onClick={onClick}
       style={{ "--usage-degrees": `${degrees}deg` } as CSSProperties}
     >
@@ -118,10 +119,10 @@ export function ConversationStatusSheet({
   return (
     <ActionSheet
       open={open}
-      title="状态"
-      ariaLabel="状态"
+      title={t("状态")}
+      ariaLabel={t("状态")}
       onClose={onClose}
-      closeLabel="关闭状态"
+      closeLabel={t("关闭状态")}
       closeIcon={<AppIcon name="close" />}
       showHandle
       titleAlign="center"
@@ -130,13 +131,13 @@ export function ConversationStatusSheet({
     >
         <dl>
           <div>
-            <dt>对话线程：</dt>
+            <dt>{t("对话线程：")}</dt>
             <dd>
-              <code>{thread.id || "暂无数据"}</code>
+              <code>{thread.id || t("暂无数据")}</code>
               {!!thread.id && (
                 <button
                   type="button"
-                  aria-label="复制会话 ID"
+                  aria-label={t("复制会话 ID")}
                   onClick={copyThreadId}
                 >
                   <AppIcon name="copy" />
@@ -145,29 +146,35 @@ export function ConversationStatusSheet({
             </dd>
           </div>
           <div>
-            <dt>目录：</dt>
-            <dd><code>{thread.cwd || "暂无数据"}</code></dd>
+            <dt>{t("目录：")}</dt>
+            <dd><code>{thread.cwd || t("暂无数据")}</code></dd>
           </div>
           <div>
-            <dt>上下文：</dt>
+            <dt>{t("上下文：")}</dt>
             <dd>
               {usage
-                ? `剩余 ${Math.round(usage.remainingPercent)}%（已用 ${formatCount(
-                    usage.used,
-                  )} / ${formatCount(usage.total)}）`
-                : "暂无数据"}
+                ? t("剩余 {remaining}%（已用 {used} / {total}）", {
+                    remaining: Math.round(usage.remainingPercent),
+                    used: formatCount(usage.used),
+                    total: formatCount(usage.total),
+                  })
+                : t("暂无数据")}
             </dd>
           </div>
           <div>
-            <dt>7 天限制：</dt>
+            <dt>{t("7 天限制：")}</dt>
             <dd>
               {sevenDay
-                ? `剩余 ${Math.round(sevenDay.remainingPercent)}%${
+                ? `${t("剩余 {remaining}%", {
+                    remaining: Math.round(sevenDay.remainingPercent),
+                  })}${
                     sevenDay.resetsAt
-                      ? `（将于 ${formatResetTime(sevenDay.resetsAt)} 重置）`
+                      ? t("（将于 {time} 重置）", {
+                          time: formatResetTime(sevenDay.resetsAt),
+                        })
                       : ""
                   }`
-                : "暂无数据"}
+                : t("暂无数据")}
             </dd>
           </div>
         </dl>
@@ -201,31 +208,31 @@ export function ConversationActionMenu({
   const actions = [
     {
       id: "pin",
-      label: pinned ? "取消置顶" : "置顶",
+      label: pinned ? t("取消置顶") : t("置顶"),
       icon: "pin" as const,
       onClick: onPin,
     },
     {
       id: "refresh",
-      label: "刷新会话",
+      label: t("刷新会话"),
       icon: "refresh" as const,
       onClick: onRefresh,
     },
     {
       id: "copy",
-      label: "复制会话 ID",
+      label: t("复制会话 ID"),
       icon: "copy" as const,
       onClick: onCopy,
     },
     {
       id: "rename",
-      label: "重命名",
+      label: t("重命名"),
       icon: "rename" as const,
       onClick: onRename,
     },
     {
       id: "archive",
-      label: "归档",
+      label: t("归档"),
       icon: "archive" as const,
       onClick: onArchive,
       danger: true,
@@ -236,10 +243,10 @@ export function ConversationActionMenu({
       <button
         className="conversation-action-dismiss"
         type="button"
-        aria-label="关闭会话操作"
+        aria-label={t("关闭会话操作")}
         onClick={onClose}
       />
-      <section className="conversation-action-menu" aria-label="会话操作">
+      <section className="conversation-action-menu" aria-label={t("会话操作")}>
         <p>{titleOf(thread)}</p>
         <div>
           {actions.map((action) => (

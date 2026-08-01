@@ -1,3 +1,5 @@
+import { t } from "../i18n";
+
 export interface RpcMessage {
   id?: number | string;
   method?: string;
@@ -37,7 +39,7 @@ export class AppServerClient {
     this.requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
     socket.addEventListener("message", (event) => this.receive(String(event.data)));
     socket.addEventListener("close", () => {
-      const error = new Error("与 app-server 的连接已断开");
+      const error = new Error(t("与 app-server 的连接已断开"));
       for (const waiter of this.pending.values()) {
         clearTimeout(waiter.timeout);
         waiter.reject(error);
@@ -63,12 +65,12 @@ export class AppServerClient {
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       if (this.socket.readyState !== WebSocket.OPEN) {
-        reject(new Error("与 app-server 的连接不可用"));
+        reject(new Error(t("与 app-server 的连接不可用")));
         return;
       }
       const timeout = setTimeout(() => {
         if (!this.pending.delete(id)) return;
-        reject(new Error(`${method} 请求超时`));
+        reject(new Error(t("{method} 请求超时", { method })));
         if (this.socket.readyState === WebSocket.OPEN) {
           this.socket.close(4000, "request timeout");
         }

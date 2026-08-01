@@ -47,7 +47,7 @@ export function parseSemanticVersion(input: string): SemanticVersion | null {
 
 function requireSemanticVersion(input: string) {
   const version = parseSemanticVersion(input);
-  if (!version) throw new Error(`无效版本号：${input}`);
+  if (!version) throw new Error(t("无效版本号：{version}", { version: input }));
   return version;
 }
 
@@ -120,7 +120,7 @@ export function parseGithubRelease(
   return {
     version,
     tag: `v${version}`,
-    notes: stringValue(payload.body).trim() || "本次版本未提供更新说明。",
+    notes: stringValue(payload.body).trim() || t("本次版本未提供更新说明。"),
     pageUrl,
     downloadUrl,
     sha256: digestMatch[1].toLowerCase(),
@@ -177,7 +177,7 @@ export function createReleaseChecker({
         if (cached) return cached;
       }
       const release = parseGithubRelease(await fetchRelease(), repository);
-      if (!release) throw new Error("最新 Release 没有可验证的 Android APK");
+      if (!release) throw new Error(t("最新 Release 没有可验证的 Android APK"));
       storage.setItem(
         APP_UPDATE_CACHE_KEY,
         JSON.stringify({ checkedAt: now(), release } satisfies CachedRelease),
@@ -186,3 +186,4 @@ export function createReleaseChecker({
     },
   };
 }
+import { t } from "../i18n";

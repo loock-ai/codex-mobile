@@ -20,6 +20,7 @@ import {
   type AggregatedThreadItem,
 } from "./thread-list-model";
 import { projectCollapseKey } from "./project-collapse";
+import { t } from "../../i18n";
 
 export function ThreadListPage({
   backends,
@@ -102,14 +103,14 @@ export function ThreadListPage({
         <span>{titleOf(thread.thread)}</span>
       </span>
       {isThreadRunning(thread.status) ? (
-        <span className="thread-running" aria-label="进行中">
+        <span className="thread-running" aria-label={t("进行中")}>
           <i className="running-dot" />
           <i className="running-spinner" />
         </span>
       ) : (
         <span className="thread-row-meta">
           {thread.unread && (
-            <i className="thread-unread-dot" aria-label="未读" />
+            <i className="thread-unread-dot" aria-label={t("未读")} />
           )}
           <time>{relativeTime(thread.timestamp, renderNow)}</time>
         </span>
@@ -137,18 +138,21 @@ export function ThreadListPage({
               {selectedBackend
                 ? `${selectedBackend.name} · ${
                     selectedSummary?.connection === "online"
-                      ? "已连接"
+                      ? t("已连接")
                       : selectedSummary?.connection === "offline"
-                        ? "已断开"
-                        : "连接中"
+                        ? t("已断开")
+                        : t("连接中")
                   }`
-                : `${enabledBackends.length} 台机器 · ${onlineCount} 台已连接`}
+                : t("{count} 台机器 · {online} 台已连接", {
+                    count: enabledBackends.length,
+                    online: onlineCount,
+                  })}
             </p>
           </div>
           <div className="list-header-actions">
             <button
               className={`round-button${refreshing ? " refreshing" : ""}`}
-              aria-label="刷新会话列表"
+              aria-label={t("刷新会话列表")}
               aria-busy={refreshing}
               onClick={onRefresh}
             >
@@ -160,7 +164,7 @@ export function ThreadListPage({
             </button>
             <button
               className="round-button"
-              aria-label="管理设备"
+              aria-label={t("管理设备")}
               onClick={onManageBackends}
             >
               <AppIcon name="more" />
@@ -179,7 +183,7 @@ export function ThreadListPage({
         {threadListState === "loading" && (
           <div
             className="thread-list-skeleton"
-            aria-label="正在加载会话"
+            aria-label={t("正在加载会话")}
             role="status"
           >
             {Array.from({ length: 5 }, (_, index) => (
@@ -194,13 +198,13 @@ export function ThreadListPage({
           <>
             {!!allGroups.pinned.length && (
               <section className="thread-section">
-                <h2>置顶</h2>
+                <h2>{t("置顶")}</h2>
                 {allGroups.pinned.map((thread) => renderRow(thread, true))}
               </section>
             )}
             {!!allGroups.recent.length && (
               <section className="thread-section">
-                <h2>最近</h2>
+                <h2>{t("最近")}</h2>
                 {allGroups.recent.map((thread) => renderRow(thread, true))}
               </section>
             )}
@@ -260,7 +264,7 @@ export function ThreadListPage({
                         {showInitialLoading && (
                           <div
                             className="project-thread-skeleton"
-                            aria-label="正在加载项目会话"
+                            aria-label={t("正在加载项目会话")}
                             role="status"
                           >
                             {Array.from({ length: 3 }, (_, index) => (
@@ -275,12 +279,14 @@ export function ThreadListPage({
                           <button
                             type="button"
                             className="project-retry"
-                            aria-label={`重试加载 ${group.projectName} 会话`}
+                            aria-label={t("重试加载 {name} 会话", {
+                              name: group.projectName,
+                            })}
                             onClick={() =>
                               onRetryProject(selectedBackendId, group.cwd)
                             }
                           >
-                            加载失败，点击重试
+                            {t("加载失败，点击重试")}
                           </button>
                         )}
                         {!showInitialLoading &&
@@ -305,10 +311,10 @@ export function ThreadListPage({
                                   className="action-spinner"
                                   aria-hidden="true"
                                 />
-                                加载中
+                                {t("加载中")}
                               </>
                             ) : (
-                              "展开显示"
+                              t("展开显示")
                             )}
                           </button>
                         )}
@@ -325,21 +331,21 @@ export function ThreadListPage({
             !projectDirectories.length ||
             Boolean(query.trim())) && (
           <div className="empty-state">
-            {query.trim() ? "没有匹配的对话" : "暂无对话"}
+            {query.trim() ? t("没有匹配的对话") : t("暂无对话")}
           </div>
         )}
         {threadListState === "error" && !totalThreadCount && (
-          <div className="empty-state">无法加载会话</div>
+          <div className="empty-state">{t("无法加载会话")}</div>
         )}
       </div>
       <ErrorBanner message={error} />
       <footer className="list-actions">
-        <label className="search-box"><AppIcon name="search" /><input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索聊天" /></label>
+        <label className="search-box"><AppIcon name="search" /><input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder={t("搜索聊天")} /></label>
         <button
           className="new-chat"
           onClick={onNewChat}
         >
-          <AppIcon name="compose" />聊天
+          <AppIcon name="compose" />{t("聊天")}
         </button>
       </footer>
     </section>

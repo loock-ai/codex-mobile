@@ -11,6 +11,7 @@ import {
   createReleaseChecker,
   type AppRelease,
 } from "../../app-update/release";
+import { t } from "../../i18n";
 import {
   APP_UPDATE_EVENT,
   readAndroidAppUpdateBridge,
@@ -72,7 +73,7 @@ async function fetchLatestRelease() {
     },
   );
   if (!response.ok) {
-    throw new Error(`检查更新失败（HTTP ${response.status}）`);
+    throw new Error(t("检查更新失败（HTTP {status}）", { status: response.status }));
   }
   return response.json() as Promise<unknown>;
 }

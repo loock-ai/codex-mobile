@@ -2,6 +2,7 @@ import type {
   BackendConfig,
   BackendRuntimeSummary,
 } from "../../backends/types";
+import { t } from "../../i18n";
 
 export function BackendAttentionBanner({
   backends,
@@ -26,11 +27,14 @@ export function BackendAttentionBanner({
     <button
       type="button"
       className="backend-attention"
-      aria-label={`${source.name} 有 ${count} 个待审批`}
+      aria-label={t("{name} 有 {count} 个待审批", {
+        name: source.name,
+        count,
+      })}
       onClick={() => onSelect(source.id)}
     >
       <span>{source.name}</span>
-      <strong>{count} 个待审批</strong>
+      <strong>{t("{count} 个待审批", { count })}</strong>
     </button>
   );
 }

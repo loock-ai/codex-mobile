@@ -1,4 +1,5 @@
 import type { RealtimeAudioChunk } from "../app-server/realtime";
+import { t } from "../i18n";
 import {
   NativeRealtimeAudioCapture,
   readNativeRealtimeAudioBridge,
@@ -70,7 +71,7 @@ export class RealtimeAudioCapture {
 
   async open() {
     if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error("当前环境不支持麦克风");
+      throw new Error(t("当前环境不支持麦克风"));
     }
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -86,7 +87,7 @@ export class RealtimeAudioCapture {
 
   start(onChunk: (chunk: RealtimeAudioChunk) => void) {
     if (!this.stream || !this.context) {
-      throw new Error("麦克风尚未准备完成");
+      throw new Error(t("麦克风尚未准备完成"));
     }
     this.source = this.context.createMediaStreamSource(this.stream);
     this.processor = this.context.createScriptProcessor(

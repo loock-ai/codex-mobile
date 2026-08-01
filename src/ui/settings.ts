@@ -36,12 +36,7 @@ export interface PermissionMode {
 }
 
 const effortLabels: Record<string, string> = {
-  low: "低",
-  medium: "中",
-  high: "高",
-  xhigh: "极高",
-  max: "最高",
-  ultra: "超高",
+  low: "低", medium: "中", high: "高", xhigh: "极高", max: "最高", ultra: "超高",
 };
 
 const permissionProfileLabels: Record<string, string> = {
@@ -66,22 +61,22 @@ const approvalPolicyDescriptions: Record<BasicApprovalPolicy, string> = {
 };
 
 export function permissionProfileLabel(id: string, description?: string | null) {
-  return permissionProfileLabels[id] || description || id.replace(/^:/, "") || "默认权限";
+  return t(permissionProfileLabels[id] || description || id.replace(/^:/, "") || "默认权限");
 }
 
 export function approvalPolicyLabel(policy: ApprovalPolicy | null | undefined) {
   if (typeof policy === "string") {
-    return approvalPolicyLabels[policy as BasicApprovalPolicy] || policy;
+    return t(approvalPolicyLabels[policy as BasicApprovalPolicy] || policy);
   }
-  return policy ? "自定义审批" : "默认审批";
+  return policy ? t("自定义审批") : t("默认审批");
 }
 
 export function approvalPolicyDescription(policy: BasicApprovalPolicy) {
-  return approvalPolicyDescriptions[policy];
+  return t(approvalPolicyDescriptions[policy]);
 }
 
 export function modelOptionMeta(model: ModelCatalogEntry) {
-  const modelId = model.model || model.id || "未知模型";
+  const modelId = model.model || model.id || t("未知模型");
   const identity =
     model.id && model.id !== modelId ? `${modelId} · ${model.id}` : modelId;
   return {
@@ -93,21 +88,21 @@ export function modelOptionMeta(model: ModelCatalogEntry) {
 export function effortOptionsForModel(model: ModelCatalogEntry | null | undefined) {
   return (model?.supportedReasoningEfforts ?? []).map((option) => ({
     id: option.reasoningEffort,
-    label: effortLabels[option.reasoningEffort] ?? option.reasoningEffort,
+    label: t(effortLabels[option.reasoningEffort] ?? option.reasoningEffort),
     description: option.description,
   }));
 }
 
 export function effortLabel(effort: string | null | undefined) {
-  return effort ? effortLabels[effort] ?? effort : "智能";
+  return effort ? t(effortLabels[effort] ?? effort) : t("智能");
 }
 
 export function speedOptionsForModel(model: ModelCatalogEntry | null | undefined) {
   return [
     {
       id: null as string | null,
-      label: "正常",
-      description: "默认速度，正常用量",
+      label: t("正常"),
+      description: t("默认速度，正常用量"),
     },
     ...(model?.serviceTiers ?? []).map((tier) => ({
       id: tier.id as string | null,
@@ -164,16 +159,16 @@ export function permissionModesFromProfiles(
     modes.push(
       {
         id: "default",
-        label: "默认权限",
-        description: "在沙盒中运行命令",
+        label: t("默认权限"),
+        description: t("在沙盒中运行命令"),
         permissions: ":workspace",
         approvalPolicy: "on-request",
         approvalsReviewer: "user",
       },
       {
         id: "auto-review",
-        label: "自动审核",
-        description: "自动审查提权请求",
+        label: t("自动审核"),
+        description: t("自动审查提权请求"),
         permissions: ":workspace",
         approvalPolicy: "on-request",
         approvalsReviewer: "auto_review",
@@ -183,8 +178,8 @@ export function permissionModesFromProfiles(
   if (ids.has(":read-only")) {
     modes.push({
       id: "read-only",
-      label: "只读",
-      description: "编辑文件或运行命令需要批准",
+      label: t("只读"),
+      description: t("编辑文件或运行命令需要批准"),
       permissions: ":read-only",
       approvalPolicy: "on-request",
       approvalsReviewer: "user",
@@ -193,8 +188,8 @@ export function permissionModesFromProfiles(
   if (ids.has(":danger-full-access")) {
     modes.push({
       id: "full-access",
-      label: "完全访问权限",
-      description: "完全访问计算机（风险较高）",
+      label: t("完全访问权限"),
+      description: t("完全访问计算机（风险较高）"),
       permissions: ":danger-full-access",
       approvalPolicy: "never",
       approvalsReviewer: "user",
@@ -231,3 +226,4 @@ export const approvalPolicyOptions: BasicApprovalPolicy[] = [
   "on-request",
   "never",
 ];
+import { t } from "../i18n";

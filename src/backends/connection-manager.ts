@@ -3,6 +3,7 @@ import {
   type RpcMessage,
 } from "../app-server/client";
 import type { ConnectionState } from "../ui/app-display";
+import { t } from "../i18n";
 import type { BackendConfig } from "./types";
 
 export interface WebSocketLike {
@@ -218,7 +219,7 @@ export class BackendConnectionManager {
       this.options.onConnection?.(
         config.id,
         "offline",
-        "无法连接设备网关",
+        t("无法连接设备网关"),
       );
     });
   }
@@ -245,7 +246,7 @@ export class BackendConnectionManager {
           client.initialize(),
           new Promise<never>((_, reject) => {
             timeout = setTimeout(
-              () => reject(new Error("设备 initialize 超时")),
+              () => reject(new Error(t("设备 initialize 超时"))),
               this.initializeTimeoutMs,
             );
           }),

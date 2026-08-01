@@ -118,6 +118,7 @@ import {
   shouldMarkThreadUnread,
   writeUnreadThreadIds,
 } from "./features/threads/thread-unread";
+import { t, useI18n } from "./i18n";
 
 type AnyRecord = Record<string, any>;
 
@@ -494,8 +495,8 @@ function BackendWorkspace({
             const message =
               reason instanceof Error ? reason.message : String(reason);
             if (
-              message.includes("访问口令") ||
-              message.includes("未被设备允许")
+              message.includes(t("访问口令不正确")) ||
+              message.includes(t("当前前端地址未被设备允许"))
             ) {
               manager.sync([]);
               setError(message);
@@ -713,7 +714,9 @@ function BackendWorkspace({
             client.respondError(
               request.id!,
               -32601,
-              `Codex Mobile Web 暂不支持服务器请求：${request.method}`,
+              t("Codex Mobile Web 暂不支持服务器请求：{method}", {
+                method: request.method ?? "unknown",
+              }),
             );
           }
       },
@@ -957,7 +960,7 @@ function BackendWorkspace({
   async function loadThreadDetail(threadId: string, sequence: number) {
     const client = clientRef.current;
     try {
-      if (!client) throw new Error("设备尚未连接，请稍后重试");
+      if (!client) throw new Error(t("设备尚未连接，请稍后重试"));
       const session = await resumeThreadSession(client, threadId);
       if (sequence !== openSequenceRef.current) {
         if (activeThreadTargetRef.current !== threadId) {
@@ -968,7 +971,7 @@ function BackendWorkspace({
         return;
       }
       if (!session.thread?.id) {
-        throw new Error("会话详情返回无效，请重试");
+        throw new Error(t("会话详情返回无效，请重试"));
       }
       const resumedSettings = normalizeModelSettings(
         models.find((model) => model.model === session.model),
@@ -1090,13 +1093,13 @@ function BackendWorkspace({
       const threadId = String(active?.id ?? "");
       const turnId = activeTurnId(active);
       if (!threadId || !turnId) {
-        setError("当前任务正在启动，请稍后再引导");
+        setError(t("当前任务正在启动，请稍后再引导"));
         return;
       }
       const clientUserMessageId =
         `steer-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const pendingSteerText =
-        text || `${pendingImages.length} 张图片`;
+        text || t("{count} 张图片", { count: pendingImages.length });
       invalidateImageReads();
       setDraft("");
       setDraftImages([]);
@@ -1333,10 +1336,10 @@ function BackendWorkspace({
           ? { ...current, isPinned: persistedPinned }
           : current,
       );
-      showNotice(persistedPinned ? "已置顶" : "已取消置顶");
+      showNotice(persistedPinned ? t("已置顶") : t("已取消置顶"));
       return true;
     } catch {
-      setError(nextPinned ? "置顶失败，请重试" : "取消置顶失败，请重试");
+      setError(nextPinned ? t("置顶失败，请重试") : t("取消置顶失败，请重试"));
       return false;
     } finally {
       setPendingAction("");
@@ -1347,7 +1350,7 @@ function BackendWorkspace({
     const client = clientRef.current;
     const thread = activeRef.current;
     if (!client || !thread?.id || pendingAction) return false;
-    const name = window.prompt("输入新的会话名称", titleOf(thread))?.trim();
+    const name = window.prompt(t("输入新的会话名称"), titleOf(thread))?.trim();
     if (!name || name === titleOf(thread)) return false;
     setPendingAction("rename");
     setError("");
@@ -1364,11 +1367,11 @@ function BackendWorkspace({
       setActive((current) =>
         current?.id === thread.id ? { ...current, name } : current,
       );
-      showNotice("已重命名");
+      showNotice(t("已重命名"));
       return true;
     } catch (reason) {
       setError(
-        reason instanceof Error ? reason.message : "重命名失败，请重试",
+        reason instanceof Error ? reason.message : t("重命名失败，请重试"),
       );
       return false;
     } finally {
@@ -1398,11 +1401,11 @@ function BackendWorkspace({
         setConversationLoadState("idle");
         onOpenSidebar();
       }
-      showNotice("已归档");
+      showNotice(t("已归档"));
       return true;
     } catch (reason) {
       setError(
-        reason instanceof Error ? reason.message : "归档失败，请重试",
+        reason instanceof Error ? reason.message : t("归档失败，请重试"),
       );
       return false;
     } finally {
@@ -1414,15 +1417,15 @@ function BackendWorkspace({
     models.find((model) => model.model === selectedModel) ?? null;
   const selectedModelLabel =
     !activeSettingsSynchronized && active?.id
-      ? "沿用线程模型"
+      ? t("沿用线程模型")
       : selectedModelEntry?.displayName ||
         selectedModel ||
-        "默认模型";
+        t("默认模型");
   const effortOptions = effortOptionsForModel(selectedModelEntry);
   const speedOptions = speedOptionsForModel(selectedModelEntry);
   const selectedSpeedLabel =
     speedOptions.find((option) => option.id === selectedServiceTier)?.label ??
-    "正常";
+    t("正常");
   const permissionModes = permissionModesFromProfiles(
     permissionProfiles as Array<{ id: string; allowed?: boolean }>,
   );
@@ -1436,7 +1439,7 @@ function BackendWorkspace({
   );
   const selectedPermissionLabel =
     !activeSettingsSynchronized && active?.id
-      ? "沿用线程权限"
+      ? t("沿用线程权限")
       : selectedPermissionMode?.label ??
         permissionProfileLabel(
           selectedPermission,
@@ -1520,7 +1523,7 @@ function BackendWorkspace({
     setActive({
       id: "",
       turns: [],
-      preview: "新对话",
+      preview: t("新对话"),
       cwd: selectedCwd,
     });
   };
@@ -1654,7 +1657,7 @@ function BackendWorkspace({
           <header className="conversation-header">
             <button
               className="round-button"
-              aria-label="打开会话列表"
+              aria-label={t("打开会话列表")}
               onClick={onOpenSidebar}
             >
               <AppIcon name="menu" />
@@ -1667,7 +1670,7 @@ function BackendWorkspace({
               </span>
             </div>
           </header>
-          <div className="empty-state">从会话列表选择对话</div>
+          <div className="empty-state">{t("从会话列表选择对话")}</div>
         </section>
       )}
       {notice && (
@@ -1710,6 +1713,7 @@ function BackendWorkspace({
 }
 
 export function App() {
+  useI18n();
   const [initialRegistry] = useState<BackendRegistry>(() => {
     const token = new URLSearchParams(window.location.search).get("token") ?? "";
     const initial = loadBackendRegistry(
@@ -1749,13 +1753,13 @@ export function AppBootstrap({
     <main className="app-shell">
       <section className="empty-state">
         <h1>Codex Mobile</h1>
-        <p>添加设备后即可连接 Codex。</p>
+        <p>{t("添加设备后即可连接 Codex。")}</p>
         <button
           className="backend-add-device"
           type="button"
           onClick={() => setManagerOpen(true)}
         >
-          添加设备
+          {t("添加设备")}
         </button>
       </section>
       <BackendManagerSheet
@@ -1773,7 +1777,7 @@ export function AppBootstrap({
           checking: appUpdate.state.phase === "checking",
           status:
             appUpdate.state.phase === "current"
-              ? "已是最新版本"
+              ? t("已是最新版本")
               : appUpdate.state.phase === "error"
                 ? appUpdate.state.error
                 : undefined,
@@ -2204,7 +2208,7 @@ function ConfiguredApp({
   );
 
   if (!selectedBackend) {
-    return <main className="app-shell"><div className="empty-state">没有可用设备</div></main>;
+    return <main className="app-shell"><div className="empty-state">{t("没有可用设备")}</div></main>;
   }
 
   return (
@@ -2237,7 +2241,7 @@ function ConfiguredApp({
         }`}
         aria-hidden={!sidebarOpen}
       >
-        <aside className="conversation-sidebar" aria-label="会话列表">
+        <aside className="conversation-sidebar" aria-label={t("会话列表")}>
           <ThreadListPage
             backends={registry.backends}
             summaries={summaries}
@@ -2269,7 +2273,7 @@ function ConfiguredApp({
         <button
           className="conversation-sidebar-scrim"
           type="button"
-          aria-label="关闭会话列表"
+          aria-label={t("关闭会话列表")}
           onClick={closeSidebar}
         />
       </div>
@@ -2295,7 +2299,7 @@ function ConfiguredApp({
           checking: appUpdate.state.phase === "checking",
           status:
             appUpdate.state.phase === "current"
-              ? "已是最新版本"
+              ? t("已是最新版本")
               : appUpdate.state.phase === "error"
                 ? appUpdate.state.error
                 : undefined,

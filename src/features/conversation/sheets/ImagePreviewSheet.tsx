@@ -6,6 +6,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { ActionSheet } from "../../../ui/ActionSheet";
+import { t } from "../../../i18n";
 import { ActionSheetDownload } from "../../../ui/ActionSheetDownload";
 
 const MIN_SCALE = 1;
@@ -117,17 +118,17 @@ export function ImagePreviewSheet({
 
   return createPortal(
     <ActionSheet
-      title="图片预览"
-      ariaLabel="图片预览"
+      title={t("图片预览")}
+      ariaLabel={t("图片预览")}
       onClose={onClose}
-      closeLabel="关闭图片预览"
+      closeLabel={t("关闭图片预览")}
       className="image-preview-sheet"
       backdropClassName="image-preview-backdrop"
       headerActions={
         <ActionSheetDownload
           href={src}
           filename={name}
-          label="下载图片"
+          label={t("下载图片")}
         />
       }
     >
@@ -149,10 +150,10 @@ export function ImagePreviewSheet({
           }}
         />
       </div>
-      <div className="image-preview-controls" aria-label="图片缩放">
+      <div className="image-preview-controls" aria-label={t("图片缩放")}>
         <button
           type="button"
-          aria-label="缩小图片"
+          aria-label={t("缩小图片")}
           disabled={scale <= MIN_SCALE}
           onClick={() => applyScale(scale - SCALE_STEP)}
         >
@@ -161,7 +162,7 @@ export function ImagePreviewSheet({
         <output aria-live="polite">{Math.round(scale * 100)}%</output>
         <button
           type="button"
-          aria-label="放大图片"
+          aria-label={t("放大图片")}
           disabled={scale >= MAX_SCALE}
           onClick={() => applyScale(scale + SCALE_STEP)}
         >
@@ -169,11 +170,11 @@ export function ImagePreviewSheet({
         </button>
         <button
           type="button"
-          aria-label="还原图片"
+          aria-label={t("还原图片")}
           disabled={scale === 1 && offset.x === 0 && offset.y === 0}
           onClick={reset}
         >
-          还原
+          {t("还原")}
         </button>
       </div>
       {details && <p className="image-preview-details">{details}</p>}

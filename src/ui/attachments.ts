@@ -40,10 +40,10 @@ export function readFileAsDataUrl(file: File) {
     const reader = new FileReader();
     reader.addEventListener("load", () => {
       if (typeof reader.result === "string") resolve(reader.result);
-      else reject(new Error(`无法读取 ${file.name}`));
+      else reject(new Error(t("无法读取 {name}", { name: file.name })));
     });
     reader.addEventListener("error", () => {
-      reject(reader.error ?? new Error(`无法读取 ${file.name}`));
+      reject(reader.error ?? new Error(t("无法读取 {name}", { name: file.name })));
     });
     reader.readAsDataURL(file);
   });
@@ -64,23 +64,23 @@ export async function prepareImageFiles(
 
   for (const [index, file] of Array.from(files).entries()) {
     if (!acceptedImageTypes.has(file.type)) {
-      errors.push(`${file.name} 不是支持的图片格式`);
+      errors.push(t("{name} 不是支持的图片格式", { name: file.name }));
       continue;
     }
     if (file.size > MAX_IMAGE_BYTES) {
-      errors.push(`${file.name} 超过 10 MB`);
+      errors.push(t("{name} 超过 10 MB", { name: file.name }));
       continue;
     }
     if (totalBytes + file.size > MAX_TOTAL_IMAGE_BYTES) {
       if (!totalSizeErrorAdded) {
-        errors.push("图片总大小不能超过 20 MB");
+        errors.push(t("图片总大小不能超过 20 MB"));
         totalSizeErrorAdded = true;
       }
       continue;
     }
     if (images.length >= available) {
       if (!quantityErrorAdded) {
-        errors.push(`最多上传 ${MAX_DRAFT_IMAGES} 张图片`);
+        errors.push(t("最多上传 {count} 张图片", { count: MAX_DRAFT_IMAGES }));
         quantityErrorAdded = true;
       }
       continue;
@@ -88,7 +88,7 @@ export async function prepareImageFiles(
     try {
       const url = await read(file);
       if (!url.startsWith(`data:${file.type};base64,`)) {
-        errors.push(`${file.name} 内容格式与 ${file.type} 不一致`);
+        errors.push(t("{name} 内容格式与 {type} 不一致", { name: file.name, type: file.type }));
         continue;
       }
       images.push({
@@ -100,7 +100,7 @@ export async function prepareImageFiles(
       });
       totalBytes += file.size;
     } catch {
-      errors.push(`无法读取 ${file.name}`);
+      errors.push(t("无法读取 {name}", { name: file.name }));
     }
   }
 
@@ -158,3 +158,4 @@ export function buildOptimisticUserContent(
     })),
   ];
 }
+import { t } from "../i18n";

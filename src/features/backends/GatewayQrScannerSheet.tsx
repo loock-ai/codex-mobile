@@ -5,6 +5,7 @@ import {
   useState,
 } from "react";
 import { ActionSheet } from "../../ui/ActionSheet";
+import { t } from "../../i18n";
 import {
   scanGatewayQrImage,
   startGatewayQrScanner,
@@ -37,7 +38,7 @@ export function GatewayQrScannerSheet({
       })
       .catch(() => {
         if (!disposed) {
-          setError("无法打开摄像头，可从相册选择二维码");
+          setError(t("无法打开摄像头，可从相册选择二维码"));
         }
       });
     return () => {
@@ -57,7 +58,7 @@ export function GatewayQrScannerSheet({
     try {
       onScan(await scanGatewayQrImage(file));
     } catch {
-      setError("未识别到二维码，请换一张图片");
+      setError(t("未识别到二维码，请换一张图片"));
     } finally {
       setReadingImage(false);
     }
@@ -65,9 +66,9 @@ export function GatewayQrScannerSheet({
 
   return (
     <ActionSheet
-      title="扫描网关二维码"
+      title={t("扫描网关二维码")}
       onClose={onClose}
-      closeLabel="关闭扫码"
+      closeLabel={t("关闭扫码")}
       closeOnBackdrop={false}
       className="gateway-qr-sheet"
     >
@@ -76,7 +77,7 @@ export function GatewayQrScannerSheet({
           ref={videoRef}
           muted
           playsInline
-          aria-label="二维码摄像头画面"
+          aria-label={t("二维码摄像头画面")}
         />
         <div className="gateway-qr-reticle" aria-hidden="true">
           <i />
@@ -86,7 +87,7 @@ export function GatewayQrScannerSheet({
         </div>
       </div>
       <p className="gateway-qr-hint">
-        将另一台设备上的连接二维码放入框内
+        {t("将另一台设备上的连接二维码放入框内")}
       </p>
       {error && (
         <p className="backend-form-error" role="alert">
@@ -94,7 +95,7 @@ export function GatewayQrScannerSheet({
         </p>
       )}
       <label className="gateway-qr-file">
-        <span>{readingImage ? "正在识别…" : "从相册选择二维码"}</span>
+        <span>{readingImage ? t("正在识别…") : t("从相册选择二维码")}</span>
         <input
           type="file"
           accept="image/*"

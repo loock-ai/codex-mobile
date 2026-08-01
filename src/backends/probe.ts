@@ -1,6 +1,7 @@
 import { AppServerClient } from "../app-server/client";
 import { backendWebSocketUrl } from "./connection-manager";
 import type { BackendConfig } from "./types";
+import { t } from "../i18n";
 
 export interface GatewayHostInfo {
   hostId: string;
@@ -15,7 +16,7 @@ export async function fetchBackendProjects(config: BackendConfig) {
     withToken(config.baseUrl, "/api/projects", config.token),
     { method: "GET", mode: "cors" },
   );
-  if (!response.ok) throw new Error(`项目目录接口返回 ${response.status}`);
+  if (!response.ok) throw new Error(t("项目目录接口返回 {status}", { status: response.status }));
   const payload = (await response.json()) as { projects?: unknown };
   return Array.isArray(payload.projects)
     ? payload.projects.filter((project): project is string => typeof project === "string")
@@ -40,12 +41,12 @@ async function initializeSocket(
           socket.addEventListener("open", () => resolve(), { once: true });
           socket.addEventListener(
             "error",
-            () => reject(new Error("无法连接设备 WebSocket")),
+            () => reject(new Error(t("无法连接设备 WebSocket"))),
             { once: true },
           );
           socket.addEventListener(
             "close",
-            () => reject(new Error("设备 WebSocket 已关闭")),
+            () => reject(new Error(t("设备 WebSocket 已关闭"))),
             { once: true },
           );
         });
@@ -53,7 +54,7 @@ async function initializeSocket(
         await client.initialize();
       })(),
       timeoutMs,
-      "WebSocket initialize 超时",
+      t("WebSocket initialize 超时"),
     );
   } finally {
     socket.close();
@@ -106,15 +107,15 @@ export async function fetchBackendHostInfo(
       },
     );
   } catch (reason) {
-    if (controller.signal.aborted) throw new Error("设备探测超时");
+    if (controller.signal.aborted) throw new Error(t("设备探测超时"));
     throw reason;
   } finally {
     clearTimeout(timeout);
   }
   if (!response.ok) {
-    if (response.status === 401) throw new Error("访问口令不正确");
-    if (response.status === 403) throw new Error("当前前端地址未被设备允许");
-    throw new Error(`设备网关返回 ${response.status}`);
+    if (response.status === 401) throw new Error(t("访问口令不正确"));
+    if (response.status === 403) throw new Error(t("当前前端地址未被设备允许"));
+    throw new Error(t("设备网关返回 {status}", { status: response.status }));
   }
   const info = (await response.json()) as GatewayHostInfo;
   if (
@@ -122,10 +123,10 @@ export async function fetchBackendHostInfo(
     typeof info.hostId !== "string" ||
     typeof info.displayName !== "string"
   ) {
-    throw new Error("设备身份响应无效");
+    throw new Error(t("设备身份响应无效"));
   }
   if (!info.appServerReady) {
-    throw new Error("设备 app-server 尚未就绪");
+    throw new Error(t("设备 app-server 尚未就绪"));
   }
   return info;
 }
@@ -142,7 +143,7 @@ export async function probeBackend(
   await withTimeout(
     initializeWebSocket(backendWebSocketUrl(config)),
     timeoutMs,
-    "WebSocket initialize 超时",
+    t("WebSocket initialize 超时"),
   );
   return info;
 }

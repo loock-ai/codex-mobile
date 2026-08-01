@@ -6,6 +6,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
+import { t } from "../i18n";
 
 const focusableSelector = [
   "a[href]",
@@ -24,7 +25,7 @@ export function ActionSheet({
   footer,
   headerActions,
   onClose,
-  closeLabel = "关闭",
+  closeLabel = t("关闭"),
   closeIcon = "×",
   closeDisabled = false,
   closeOnBackdrop = true,

@@ -91,6 +91,11 @@ button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; 
 .backend-row-actions button { min-width: 34px; height: 34px; border: 0; border-radius: 17px; background: #f3f3f3; padding: 0 9px; font-size: 11px; }
 .backend-row-actions button:disabled { opacity: .25; }
 .backend-add-device { width: 100%; margin-top: 17px; border: 0; border-radius: 24px; background: #111; color: #fff; padding: 13px 16px; font-weight: 650; }
+.backend-language-settings { margin-top: 14px; padding-top: 14px; border-top: 1px solid #e9e9e9; display: grid; gap: 10px; }
+.backend-language-settings > strong { font-size: 14px; }
+.backend-language-settings > div { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; padding: 4px; border-radius: 18px; background: #ededed; }
+.backend-language-settings button { min-width: 0; border: 0; border-radius: 14px; background: transparent; padding: 9px 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 650; }
+.backend-language-settings button.selected { background: #fff; box-shadow: 0 1px 5px rgba(0,0,0,.08); }
 .backend-form { display: grid; gap: 15px; padding-top: 8px; }
 .backend-form label { display: grid; gap: 7px; color: #555; font-size: 12px; }
 .backend-form-field { display: grid; gap: 7px; }

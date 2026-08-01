@@ -4,6 +4,7 @@ import {
   summarizeFileChange,
 } from "../../../ui/conversation";
 import { ActionSheet } from "../../../ui/ActionSheet";
+import { t } from "../../../i18n";
 import { Chevron } from "../../../ui/icons";
 
 type AnyRecord = Record<string, any>;
@@ -18,12 +19,12 @@ export function ToolDetailSheet({
   const isCommand = item.type === "commandExecution";
   const isFile = item.type === "fileChange";
   const title = isCommand
-    ? "命令执行"
+    ? t("命令执行")
     : isFile
-      ? "文件修改"
+      ? t("文件修改")
       : item.type === "collabAgentToolCall"
-        ? "智能体调用"
-        : "工具调用";
+        ? t("智能体调用")
+        : t("工具调用");
   const output =
     item.aggregatedOutput ??
     item.result ??
@@ -34,20 +35,20 @@ export function ToolDetailSheet({
     <ActionSheet
       title={title}
       onClose={onClose}
-      closeLabel="关闭工具详情"
+      closeLabel={t("关闭工具详情")}
       tone="soft"
       className="tool-detail-sheet"
       backdropClassName="tool-detail-backdrop"
     >
         {isCommand && (
           <>
-            <h4>命令</h4>
+            <h4>{t("命令")}</h4>
             <code className="detail-command">{item.command}</code>
           </>
         )}
         {isFile && (
           <>
-            <h4>文件</h4>
+            <h4>{t("文件")}</h4>
             <div className="detail-file-list">
               {(item.changes ?? []).map((change: AnyRecord) => (
                 <code key={change.path}>{change.path}</code>
@@ -57,25 +58,25 @@ export function ToolDetailSheet({
         )}
         {!isCommand && !isFile && (
           <>
-            <h4>工具</h4>
+            <h4>{t("工具")}</h4>
             <code className="detail-command">{item.tool || item.type}</code>
           </>
         )}
         <dl>
-          <div><dt>状态</dt><dd>{item.status === "inProgress" ? "进行中" : item.status || "已完成"}</dd></div>
-          {item.cwd && <div><dt>工作目录</dt><dd>{item.cwd}</dd></div>}
-          {item.durationMs != null && <div><dt>耗时</dt><dd>{item.durationMs} ms</dd></div>}
-          {item.exitCode != null && <div><dt>退出码</dt><dd>{item.exitCode}</dd></div>}
+          <div><dt>{t("状态")}</dt><dd>{item.status === "inProgress" ? t("进行中") : item.status || t("已完成")}</dd></div>
+          {item.cwd && <div><dt>{t("工作目录")}</dt><dd>{item.cwd}</dd></div>}
+          {item.durationMs != null && <div><dt>{t("耗时")}</dt><dd>{item.durationMs} ms</dd></div>}
+          {item.exitCode != null && <div><dt>{t("退出码")}</dt><dd>{item.exitCode}</dd></div>}
         </dl>
         {item.arguments != null && (
           <>
-            <h4>参数</h4>
+            <h4>{t("参数")}</h4>
             <pre>{JSON.stringify(item.arguments, null, 2)}</pre>
           </>
         )}
         {output != null && (
           <>
-            <h4>{isCommand ? "输出" : "详情"}</h4>
+            <h4>{isCommand ? t("输出") : t("详情")}</h4>
             <pre>{typeof output === "string" ? output : JSON.stringify(output, null, 2)}</pre>
           </>
         )}
@@ -87,7 +88,7 @@ function diffHunkLabel(lines: ReturnType<typeof parseUnifiedDiff>, index: number
   const current = lines[index]?.text.match(
     /^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@/,
   );
-  if (!current) return "上下文";
+  if (!current) return t("上下文");
   const start = Number(current[1]);
   let previousEnd = 1;
   for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
@@ -101,7 +102,7 @@ function diffHunkLabel(lines: ReturnType<typeof parseUnifiedDiff>, index: number
     break;
   }
   const unchanged = Math.max(0, start - previousEnd);
-  return unchanged ? `${unchanged} 行未修改` : "上下文";
+  return unchanged ? t("{count} 行未修改", { count: unchanged }) : t("上下文");
 }
 
 export function FileDiffSheet({
@@ -117,10 +118,10 @@ export function FileDiffSheet({
   );
   return (
     <ActionSheet
-      title={`已更改 ${changes.length} 个文件`}
-      ariaLabel={`已更改 ${changes.length} 个文件`}
+      title={t("已更改 {count} 个文件", { count: changes.length })}
+      ariaLabel={t("已更改 {count} 个文件", { count: changes.length })}
       onClose={onClose}
-      closeLabel="关闭文件修改"
+      closeLabel={t("关闭文件修改")}
       titleAlign="center"
       className="file-diff-sheet"
       backdropClassName="tool-detail-backdrop"
@@ -147,7 +148,7 @@ export function FileDiffSheet({
                   }
                 >
                   <Chevron direction={expanded ? "down" : "right"} />
-                  <strong>{change.path || "未命名文件"}</strong>
+                  <strong>{change.path || t("未命名文件")}</strong>
                   {stats.additions > 0 && (
                     <span className="diff-add">+{stats.additions}</span>
                   )}
@@ -179,7 +180,7 @@ export function FileDiffSheet({
                         ),
                       )
                     ) : (
-                      <div className="file-diff-empty">暂无 Diff 内容</div>
+                      <div className="file-diff-empty">{t("暂无 Diff 内容")}</div>
                     )}
                   </div>
                 )}

@@ -2,11 +2,12 @@ import type {
   BackendConfig,
   BackendRuntimeSummary,
 } from "../../backends/types";
+import { t } from "../../i18n";
 
 function statusLabel(summary: BackendRuntimeSummary | undefined) {
-  if (!summary || summary.connection === "connecting") return "连接中";
-  if (summary.connection === "online") return "已连接";
-  return "已断开";
+  if (!summary || summary.connection === "connecting") return t("连接中");
+  if (summary.connection === "online") return t("已连接");
+  return t("已断开");
 }
 
 export function BackendSwitcher({
@@ -28,15 +29,15 @@ export function BackendSwitcher({
     0,
   );
   return (
-    <nav className="backend-switcher" aria-label="设备">
+    <nav className="backend-switcher" aria-label={t("设备")}>
       <button
         type="button"
         className="backend-pill all-backends"
-        aria-label="全部设备"
+        aria-label={t("全部设备")}
         aria-pressed={selectedBackendId === "all"}
         onClick={() => onSelect("all")}
       >
-        <strong>全部</strong>
+        <strong>{t("全部")}</strong>
         {!!allApprovalCount && (
           <b className="backend-approval-count">{allApprovalCount}</b>
         )}
@@ -47,9 +48,9 @@ export function BackendSwitcher({
         const loading = loadingBackendIds.has(backend.id);
         const details = [
           statusLabel(summary),
-          loading ? "正在加载会话" : "",
+          loading ? t("正在加载会话") : "",
           summary?.approvalCount
-            ? `${summary.approvalCount} 个待审批`
+            ? t("{count} 个待审批", { count: summary.approvalCount })
             : "",
         ].filter(Boolean).join("，");
         return (
@@ -64,7 +65,7 @@ export function BackendSwitcher({
             {loading ? (
               <i
                 className="action-spinner backend-loading"
-                aria-label="正在加载机器会话"
+                aria-label={t("正在加载机器会话")}
               />
             ) : (
               <i className={`status-dot ${status}`} />

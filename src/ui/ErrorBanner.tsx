@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AppIcon } from "./app-display";
+import { t } from "../i18n";
 
 export function ErrorBanner({ message }: { message: string }) {
   const [dismissedMessage, setDismissedMessage] = useState<string | null>(null);
@@ -15,7 +16,7 @@ export function ErrorBanner({ message }: { message: string }) {
       <span>{message}</span>
       <button
         type="button"
-        aria-label="关闭错误提示"
+        aria-label={t("关闭错误提示")}
         onClick={() => setDismissedMessage(message)}
       >
         <AppIcon name="close" />

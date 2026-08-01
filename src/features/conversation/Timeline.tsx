@@ -22,6 +22,7 @@ import {
   RemoteFileLink,
   RemoteImage,
 } from "./sheets/RemoteFileSheets";
+import { t, getActiveLocale } from "../../i18n";
 import {
   FileDiffSheet,
   ToolDetailSheet,
@@ -115,7 +116,7 @@ function UserBubble({
             setExpanded((current) => !current);
           }}
         >
-          {expanded ? "收起" : "展开更多"}
+          {expanded ? t("收起") : t("展开更多")}
           <Chevron direction={expanded ? "up" : "down"} />
         </button>
       )}
@@ -125,7 +126,7 @@ function UserBubble({
   return (
     <div className="automation-user-message">
       <small className="automation-message-label">
-        通过自动化功能发送
+        {t("通过自动化功能发送")}
       </small>
       {bubble}
     </div>
@@ -138,11 +139,13 @@ function ToolActivity({ items }: { items: AnyRecord[] }) {
   const selected = selectedIndex == null ? null : items[selectedIndex] ?? null;
   const [expanded, setExpanded] = useState(summary.running);
   const parts = [
-    summary.fileCount ? `已更改 ${summary.fileCount} 个文件` : "",
+    summary.fileCount ? t("已更改 {count} 个文件", { count: summary.fileCount }) : "",
     summary.commandCount
-      ? `${summary.running ? "正在运行" : "已运行"} ${summary.commandCount} 个命令`
+      ? t(summary.running ? "正在运行 {count} 个命令" : "已运行 {count} 个命令", {
+          count: summary.commandCount,
+        })
       : "",
-    summary.toolCount ? `已调用 ${summary.toolCount} 个工具` : "",
+    summary.toolCount ? t("已调用 {count} 个工具", { count: summary.toolCount }) : "",
   ].filter(Boolean);
   return (
     <>
@@ -156,7 +159,7 @@ function ToolActivity({ items }: { items: AnyRecord[] }) {
         <summary>
           <span className="activity-icon">‹/›</span>
           <span className="activity-summary-text">
-            {parts.join("，") || "工具活动"}
+            {parts.join(getActiveLocale() === "zh-CN" ? "，" : ", ") || t("工具活动")}
             {summary.additions > 0 && <em className="diff-add">+{summary.additions}</em>}
             {summary.deletions > 0 && <em className="diff-delete">-{summary.deletions}</em>}
           </span>
@@ -200,10 +203,10 @@ function TimelineItem({
       <div
         className="context-compaction"
         role="separator"
-        aria-label="上下文已压缩"
+        aria-label={t("上下文已压缩")}
       >
         <span aria-hidden="true">⟳</span>
-        <strong>上下文已压缩</strong>
+        <strong>{t("上下文已压缩")}</strong>
       </div>
     );
   }
@@ -269,12 +272,12 @@ function StreamCharacterCount({
   return (
     <div
       className="stream-character-count"
-      aria-label={`已接收 ${count} 字符${
-        elapsedLabel ? `，已运行 ${elapsedLabel}` : ""
+      aria-label={`${t("已接收 {count} 字符", { count })}${
+        elapsedLabel ? t("，已运行 {elapsed}", { elapsed: elapsedLabel }) : ""
       }`}
     >
       <i className="stream-character-spinner" aria-hidden="true" />
-      <span>{count} 字符</span>
+      <span>{t("{count} 字符", { count })}</span>
       {elapsedLabel && (
         <span className="stream-elapsed">· {elapsedLabel}</span>
       )}
@@ -294,12 +297,18 @@ function formatTurnDuration(durationMs: number) {
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
   if (hours > 0) {
-    return `${hours}小时${minutes > 0 ? `${minutes}分` : ""}`;
+    return t("{hours}小时{minutes}", {
+      hours,
+      minutes: minutes > 0 ? t("{count}分", { count: minutes }) : "",
+    }).trim();
   }
   if (minutes > 0) {
-    return `${minutes}分${seconds > 0 ? `${seconds}秒` : ""}`;
+    return t("{minutes}分{seconds}", {
+      minutes,
+      seconds: seconds > 0 ? t("{count}秒", { count: seconds }) : "",
+    }).trim();
   }
-  return `${seconds}秒`;
+  return t("{seconds}秒", { seconds });
 }
 
 function valueCharacterCount(value: unknown) {
@@ -514,12 +523,12 @@ function CompletedResponseSegment({
             type="button"
             className="previous-messages-toggle"
             aria-expanded={showPrevious}
-            aria-label={`之前的 ${completed.previousCount} 条消息${
+            aria-label={`${t("之前的 {count} 条消息", { count: completed.previousCount })}${
               durationLabel ? ` · ${durationLabel}` : ""
             }`}
             onClick={() => setShowPrevious((current) => !current)}
           >
-            之前的 {completed.previousCount} 条消息
+            {t("之前的 {count} 条消息", { count: completed.previousCount })}
             {durationLabel && (
               <span className="turn-duration">· {durationLabel}</span>
             )}
@@ -539,7 +548,7 @@ function CompletedResponseSegment({
           {showCopy && (
             <CopyButton
               text={() => visibleAssistantText(copyTarget.current)}
-              label="复制本回合 AI 消息"
+              label={t("复制本回合 AI 消息")}
               className="turn-message-copy"
             />
           )}

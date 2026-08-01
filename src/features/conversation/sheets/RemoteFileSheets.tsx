@@ -12,6 +12,7 @@ import {
   type ImageSource,
 } from "../../../ui/conversation";
 import { ActionSheet } from "../../../ui/ActionSheet";
+import { t } from "../../../i18n";
 import { ActionSheetDownload } from "../../../ui/ActionSheetDownload";
 import { ImagePreviewSheet } from "./ImagePreviewSheet";
 
@@ -42,7 +43,7 @@ function remoteMarkdownImage(path: string, source: string): ImageSource {
   if (/^(?:data:|https?:)/i.test(source)) {
     return {
       source,
-      name: source.split(/[?#]/)[0]?.split("/").at(-1) || "图片",
+      name: source.split(/[?#]/)[0]?.split("/").at(-1) || t("图片"),
       local: false,
     };
   }
@@ -57,7 +58,7 @@ function remoteMarkdownImage(path: string, source: string): ImageSource {
   }
   return {
     source: resolved,
-    name: resolved.split("/").at(-1) || "图片",
+    name: resolved.split("/").at(-1) || t("图片"),
     local: true,
   };
 }
@@ -98,7 +99,7 @@ export function RemoteImage({
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
   const inline = /^data:/i.test(image.source);
-  const displayName = inline ? alt?.trim() || "图片" : image.name;
+  const displayName = inline ? alt?.trim() || t("图片") : image.name;
 
   useEffect(() => {
     let cancelled = false;
@@ -128,16 +129,16 @@ export function RemoteImage({
   }, [client, image.local, image.source]);
 
   if (failed) {
-    return <div className="image-load-error">无法读取 {image.name}</div>;
+    return <div className="image-load-error">{t("无法读取 {name}", { name: image.name })}</div>;
   }
-  if (!src) return <div className="image-placeholder" aria-label={`正在加载 ${image.name}`} />;
+  if (!src) return <div className="image-placeholder" aria-label={t("正在加载 {name}", { name: image.name })} />;
 
   return (
     <>
       <button
         type="button"
         className="message-image-button"
-        aria-label={`查看图片 ${displayName}`}
+        aria-label={t("查看图片 {name}", { name: displayName })}
         onClick={(event) => {
           event.stopPropagation();
           setOpen(true);
@@ -193,7 +194,7 @@ function RemoteTextFileSheet({
     error: "",
   });
   const targetLineRef = useRef<HTMLDivElement | null>(null);
-  const name = path.split("/").filter(Boolean).at(-1) || "远程文件";
+  const name = path.split("/").filter(Boolean).at(-1) || t("远程文件");
   const markdown = isMarkdownPath(path);
   const [viewMode, setViewMode] = useState<"preview" | "source">(
     markdown ? "preview" : "source",
@@ -214,7 +215,7 @@ function RemoteTextFileSheet({
       setState((current) => ({
         ...current,
         status: "error",
-        error: "尚未连接 app-server",
+        error: t("尚未连接 app-server"),
       }));
       return () => {
         cancelled = true;
@@ -288,10 +289,10 @@ function RemoteTextFileSheet({
 
   return (
     <ActionSheet
-      title="远程文件"
-      ariaLabel="远程文件"
+      title={t("远程文件")}
+      ariaLabel={t("远程文件")}
       onClose={onClose}
-      closeLabel="关闭远程文件"
+      closeLabel={t("关闭远程文件")}
       className="remote-text-sheet"
       backdropClassName="remote-file-backdrop"
       headerActions={
@@ -300,7 +301,7 @@ function RemoteTextFileSheet({
             <ActionSheetDownload
               href={`data:text/plain;charset=utf-8;base64,${state.dataBase64}`}
               filename={name}
-              label="下载文件"
+              label={t("下载文件")}
             />
           )}
         </>
@@ -316,23 +317,23 @@ function RemoteTextFileSheet({
             <div
               className="remote-markdown-mode"
               role="group"
-              aria-label="Markdown 显示模式"
+              aria-label={t("Markdown 显示模式")}
             >
               <button
                 type="button"
-                aria-label="预览 Markdown"
+                aria-label={t("预览 Markdown")}
                 aria-pressed={viewMode === "preview"}
                 onClick={() => setViewMode("preview")}
               >
-                预览
+                {t("预览")}
               </button>
               <button
                 type="button"
-                aria-label="查看源码"
+                aria-label={t("查看源码")}
                 aria-pressed={viewMode === "source"}
                 onClick={() => setViewMode("source")}
               >
-                源码
+                {t("源码")}
               </button>
             </div>
           )}
@@ -340,21 +341,21 @@ function RemoteTextFileSheet({
         <div className="remote-text-content">
           {state.status === "loading" && (
             <div className="remote-text-status" role="status">
-              正在读取文件…
+              {t("正在读取文件…")}
             </div>
           )}
           {state.status === "error" && (
             <div className="remote-text-status error" role="alert">
-              无法读取文件：{state.error}
+              {t("无法读取文件：{message}", { message: state.error })}
             </div>
           )}
           {state.status === "ready" && state.binary && (
             <div className="remote-text-status">
-              这是二进制文件，无法作为文本预览
+              {t("这是二进制文件，无法作为文本预览")}
             </div>
           )}
           {state.status === "ready" && !state.binary && !lines.length && (
-            <div className="remote-text-status">文件内容为空</div>
+            <div className="remote-text-status">{t("文件内容为空")}</div>
           )}
           {state.status === "ready" &&
             !state.binary &&

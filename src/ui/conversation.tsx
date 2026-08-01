@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
+import { t } from "../i18n";
 import remarkGfm from "remark-gfm";
 import { CopyButton, reactNodeText } from "./copy";
 
@@ -137,10 +138,10 @@ export function removePendingTurn(
 
 export function relativeTime(timestamp: number, now = Math.floor(Date.now() / 1000)) {
   const elapsed = Math.max(0, Math.floor(now - timestamp));
-  if (elapsed < 60) return "刚刚";
-  if (elapsed < 3600) return `${Math.floor(elapsed / 60)} 分钟`;
-  if (elapsed < 86400) return `${Math.floor(elapsed / 3600)} 小时`;
-  return `${Math.floor(elapsed / 86400)} 天`;
+  if (elapsed < 60) return t("刚刚");
+  if (elapsed < 3600) return t("{count} 分钟", { count: Math.floor(elapsed / 60) });
+  if (elapsed < 86400) return t("{count} 小时", { count: Math.floor(elapsed / 3600) });
+  return t("{count} 天", { count: Math.floor(elapsed / 86400) });
 }
 
 export function isThreadRunning(status: unknown) {
@@ -320,33 +321,33 @@ export function toolActivityRowLabel(item: ConversationRecord) {
   if (item.type === "commandExecution") {
     const action = item.commandActions?.[0];
     if (action?.type === "read") {
-      return `${running ? "正在读取" : "已读取"} ${shortValue(action.name || action.path, "文件")}`;
+      return t(running ? "正在读取 {target}" : "已读取 {target}", { target: shortValue(action.name || action.path, t("文件")) });
     }
     if (action?.type === "listFiles") {
-      return `${running ? "正在查看" : "已查看"} ${shortValue(action.path, "文件")}`;
+      return t(running ? "正在查看 {target}" : "已查看 {target}", { target: shortValue(action.path, t("文件")) });
     }
     if (action?.type === "search") {
-      return `${running ? "正在搜索" : "已搜索"} ${action.query || shortValue(action.path, "内容")}`;
+      return t(running ? "正在搜索 {target}" : "已搜索 {target}", { target: action.query || shortValue(action.path, t("内容")) });
     }
-    return `${running ? "正在运行" : item.status === "failed" ? "执行失败" : "已执行"} ${item.command || "命令"}`;
+    return t(running ? "正在运行 {target}" : item.status === "failed" ? "执行失败 {target}" : "已执行 {target}", { target: item.command || t("命令") });
   }
   if (item.type === "fileChange") {
     const changes = item.changes ?? [];
     const target =
       changes.length === 1
-        ? shortValue(changes[0]?.path, "文件")
-        : `${changes.length} 个文件`;
-    return `${running ? "正在修改" : item.status === "failed" ? "修改失败" : "已编辑"} ${target}`;
+        ? shortValue(changes[0]?.path, t("文件"))
+        : t("{count} 个文件", { count: changes.length });
+    return t(running ? "正在修改 {target}" : item.status === "failed" ? "修改失败 {target}" : "已编辑 {target}", { target });
   }
-  if (item.type === "sleep") return "已等待";
+  if (item.type === "sleep") return t("已等待");
   if (
     item.type === "collabToolCall" ||
     item.type === "collabAgentToolCall"
   ) {
-    return `${running ? "正在调用" : "已调用"}智能体 ${item.tool ?? ""}`.trim();
+    return t(running ? "正在调用智能体 {name}" : "已调用智能体 {name}", { name: item.tool ?? "" }).trim();
   }
-  const name = item.tool || item.query || item.type || "工具";
-  return `${running ? "正在调用" : "已调用"} ${name}`;
+  const name = item.tool || item.query || item.type || t("工具");
+  return t(running ? "正在调用 {name}" : "已调用 {name}", { name });
 }
 
 export interface ImageSource {
@@ -356,14 +357,14 @@ export interface ImageSource {
 }
 
 function imageName(source: string) {
-  if (source.startsWith("data:")) return "图片";
+  if (source.startsWith("data:")) return t("图片");
   try {
     const path = /^https?:/i.test(source) ? new URL(source).pathname : source;
     return decodeURIComponent(
-      path.split(/[\\/]/).filter(Boolean).at(-1) ?? "图片",
+      path.split(/[\\/]/).filter(Boolean).at(-1) ?? t("图片"),
     );
   } catch {
-    return shortValue(source, "图片");
+    return shortValue(source, t("图片"));
   }
 }
 
@@ -918,7 +919,7 @@ export function MarkdownMessage({
           <pre>{children}</pre>
           <CopyButton
             text={code}
-            label="复制代码块"
+            label={t("复制代码块")}
             className="code-block-copy"
           />
         </div>
@@ -927,7 +928,7 @@ export function MarkdownMessage({
     ...(renderImage
       ? {
           img: ({ src, alt }: { src?: string; alt?: string }) => (
-            <>{renderImage(src ?? "", alt ?? "图片")}</>
+            <>{renderImage(src ?? "", alt ?? t("图片"))}</>
           ),
         }
       : {}),

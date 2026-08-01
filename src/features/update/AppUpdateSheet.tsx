@@ -1,14 +1,15 @@
 import type { AppUpdateState } from "./useAppUpdate";
 import { ActionSheet } from "../../ui/ActionSheet";
+import { t } from "../../i18n";
 
 function statusLabel(state: AppUpdateState) {
   switch (state.phase) {
     case "downloading":
-      return `正在下载 ${Math.max(0, Math.min(100, Math.round(state.progress ?? 0)))}%`;
+      return t("正在下载 {progress}%", { progress: Math.max(0, Math.min(100, Math.round(state.progress ?? 0))) });
     case "verifying":
-      return "正在验证安装包";
+      return t("正在验证安装包");
     case "installing":
-      return "正在打开系统安装器";
+      return t("正在打开系统安装器");
     default:
       return "";
   }
@@ -37,19 +38,19 @@ export function AppUpdateSheet({
       title={
           <div>
             <small>Codex Mobile</small>
-            <h2>发现新版本</h2>
+            <h2>{t("发现新版本")}</h2>
           </div>
       }
-      ariaLabel="发现新版本"
+      ariaLabel={t("发现新版本")}
       className="app-update-sheet"
       backdropClassName="app-update-backdrop"
       closeOnBackdrop={false}
-      closeLabel="关闭更新"
+      closeLabel={t("关闭更新")}
       closeDisabled={working}
       footer={
         <>
           <button type="button" disabled={working} onClick={onClose}>
-            稍后
+            {t("稍后")}
           </button>
           <button
             className="primary"
@@ -57,7 +58,7 @@ export function AppUpdateSheet({
             disabled={working}
             onClick={state.phase === "error" ? onRetry : onInstall}
           >
-            {state.phase === "error" ? "重试" : working ? label : "立即更新"}
+            {state.phase === "error" ? t("重试") : working ? label : t("立即更新")}
           </button>
         </>
       }
@@ -65,7 +66,7 @@ export function AppUpdateSheet({
         <div className="app-update-content">
           <strong>v{state.release.version}</strong>
           <p className="app-update-current">
-            当前版本 v{state.currentVersion}
+            {t("当前版本 v{version}", { version: state.currentVersion })}
           </p>
           <div className="app-update-notes">{state.release.notes}</div>
           {label && (
@@ -78,7 +79,7 @@ export function AppUpdateSheet({
           )}
           {state.phase === "error" && (
             <p className="app-update-error" role="alert">
-              {state.error || "更新失败，请重试"}
+              {state.error || t("更新失败，请重试")}
             </p>
           )}
         </div>

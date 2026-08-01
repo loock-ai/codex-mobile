@@ -1,4 +1,5 @@
 import type { AppServerClient, RpcMessage } from "./client";
+import { t } from "../i18n";
 
 export type RealtimeStatus =
   | "idle"
@@ -58,10 +59,10 @@ export function realtimeUnavailableReason({
   if (hasNativeBridge) return "";
   const localProtocol = ["file:", "capacitor:"].includes(protocol);
   if (!isSecureContext && !localProtocol) {
-    return "当前页面使用 HTTP，浏览器仅允许在 HTTPS 页面申请麦克风权限";
+    return t("当前页面使用 HTTP，浏览器仅允许在 HTTPS 页面申请麦克风权限");
   }
   if (!hasGetUserMedia) {
-    return "当前环境不支持麦克风";
+    return t("当前环境不支持麦克风");
   }
   return "";
 }
