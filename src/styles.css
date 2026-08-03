@@ -329,6 +329,7 @@ button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; 
 .remote-markdown-preview h1, .remote-markdown-preview h2, .remote-markdown-preview h3 { margin: 1.35em 0 .65em; line-height: 1.28; }
 .remote-markdown-preview > :first-child { margin-top: 0; }
 .remote-markdown-preview img { border-radius: 12px; }
+.remote-html-preview { display: block; width: 100%; min-height: 55dvh; border: 0; background: #fff; }
 .remote-text-line { min-width: max-content; display: grid; grid-template-columns: 48px minmax(max-content,1fr); font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .remote-text-line > span { padding: 2px 9px; border-right: 1px solid #ececec; color: #999; text-align: right; user-select: none; }
 .remote-text-line code { min-width: max-content; padding: 2px 12px; white-space: pre; font: inherit; }

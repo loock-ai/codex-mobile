@@ -39,6 +39,10 @@ function isMarkdownPath(source: string) {
   return /\.(?:md|markdown)$/i.test(source);
 }
 
+function isHtmlPath(source: string) {
+  return /\.(?:html?|xhtml)$/i.test(source);
+}
+
 function remoteMarkdownImage(path: string, source: string): ImageSource {
   if (/^(?:data:|https?:)/i.test(source)) {
     return {
@@ -196,13 +200,16 @@ function RemoteTextFileSheet({
   const targetLineRef = useRef<HTMLDivElement | null>(null);
   const name = path.split("/").filter(Boolean).at(-1) || t("远程文件");
   const markdown = isMarkdownPath(path);
+  const html = isHtmlPath(path);
   const [viewMode, setViewMode] = useState<"preview" | "source">(
-    markdown ? "preview" : "source",
+    markdown || html ? "preview" : "source",
   );
 
   useEffect(() => {
     let cancelled = false;
-    setViewMode(isMarkdownPath(path) ? "preview" : "source");
+    setViewMode(
+      isMarkdownPath(path) || isHtmlPath(path) ? "preview" : "source",
+    );
     setState({
       status: "loading",
       text: "",
@@ -313,15 +320,17 @@ function RemoteTextFileSheet({
             <strong>{name}</strong>
             {state.bytes != null ? ` (${formatImageSize(state.bytes)})` : ""}
           </div>
-          {markdown && state.status === "ready" && !state.binary && (
+          {(markdown || html) && state.status === "ready" && !state.binary && (
             <div
               className="remote-markdown-mode"
               role="group"
-              aria-label={t("Markdown 显示模式")}
+              aria-label={t(
+                markdown ? "Markdown 显示模式" : "HTML 显示模式",
+              )}
             >
               <button
                 type="button"
-                aria-label={t("预览 Markdown")}
+                aria-label={t(markdown ? "预览 Markdown" : "预览 HTML")}
                 aria-pressed={viewMode === "preview"}
                 onClick={() => setViewMode("preview")}
               >
@@ -376,7 +385,20 @@ function RemoteTextFileSheet({
             )}
           {state.status === "ready" &&
             !state.binary &&
-            (!markdown || viewMode === "source") &&
+            html &&
+            viewMode === "preview" &&
+            lines.length > 0 && (
+              <iframe
+                className="remote-html-preview"
+                title={t("{name} HTML 预览", { name })}
+                srcDoc={state.text}
+                sandbox=""
+                referrerPolicy="no-referrer"
+              />
+            )}
+          {state.status === "ready" &&
+            !state.binary &&
+            ((!markdown && !html) || viewMode === "source") &&
             lines.map((content, index) => {
               const lineNumber = index + 1;
               const target = lineNumber === line;

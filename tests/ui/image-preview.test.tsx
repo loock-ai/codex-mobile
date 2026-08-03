@@ -156,6 +156,38 @@ describe("图片放大预览", () => {
     ).toBe("true");
   });
 
+  it("远程 HTML 文件默认使用隔离预览并允许切换源码", async () => {
+    const html = "<!doctype html><html><body><h1>Remote page</h1><script>alert('blocked')</script></body></html>";
+    const request = vi.fn().mockResolvedValue({
+      dataBase64: window.btoa(html),
+    });
+    render(
+      <RemoteFileLink
+        href="/tmp/project/index.html"
+        client={{ request } as any}
+      >
+        index.html
+      </RemoteFileLink>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "index.html" }));
+
+    const preview = await screen.findByTitle("index.html HTML 预览");
+    expect(preview.tagName).toBe("IFRAME");
+    expect(preview.getAttribute("sandbox")).toBe("");
+    expect(preview.getAttribute("referrerpolicy")).toBe("no-referrer");
+    expect(preview.getAttribute("srcdoc")).toBe(html);
+    expect(
+      screen.getByRole("button", { name: "预览 HTML" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: "查看源码" }));
+
+    expect(screen.getByText(html)).not.toBeNull();
+    expect(screen.queryByTitle("index.html HTML 预览")).toBeNull();
+  });
+
   it("用户和 AI Markdown 图片都使用可点击预览入口", async () => {
     render(
       <TurnCard
