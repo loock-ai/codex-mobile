@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -15,6 +16,7 @@ function readProjectFile(path: string) {
 }
 
 interface WorkflowStep {
+  env?: Record<string, string>;
   if?: string;
   name?: string;
   run?: string;
@@ -32,7 +34,17 @@ interface Workflow {
     workflow_call?: {
       inputs?: Record<string, unknown>;
     };
-    workflow_dispatch?: unknown;
+    workflow_dispatch?: {
+      inputs?: Record<
+        string,
+        {
+          default?: boolean | string;
+          description?: string;
+          required?: boolean;
+          type?: string;
+        }
+      >;
+    };
   };
   concurrency?: {
     group?: string;
@@ -61,6 +73,10 @@ interface Workflow {
     npm?: {
       if?: string;
       needs?: string;
+      permissions?: {
+        contents?: string;
+        "id-token"?: string;
+      };
       uses?: string;
       with?: Record<string, string>;
       secrets?: string;
@@ -273,6 +289,12 @@ describe("移动 App 内置前端流水线", () => {
       ]),
     );
     expect(workflow.on).toHaveProperty("workflow_dispatch");
+    expect(
+      workflow.on?.workflow_dispatch?.inputs?.release_version,
+    ).toMatchObject({
+      required: false,
+      type: "string",
+    });
     expect(workflow.concurrency).toMatchObject({
       "cancel-in-progress": true,
     });
@@ -286,6 +308,75 @@ describe("移动 App 内置前端流水线", () => {
     expect(resolveVersion).toContain("releases/latest");
     expect(resolveVersion).toContain("package.json");
     expect(resolveVersion).toContain("patch + 1");
+    expect(resolveVersion).toContain("REQUESTED_VERSION");
+    expect(resolveVersion).toContain(
+      "Manual npm publishing requires release_version",
+    );
+    expect(resolveVersion).toContain(
+      "Manual npm publishing requires the next GitHub Release patch version",
+    );
+    expect(
+      spawnSync("bash", ["-n"], {
+        input: resolveVersion,
+        encoding: "utf8",
+      }).status,
+    ).toBe(0);
+    const manualVersionDirectory = mkdtempSync(
+      join(tmpdir(), "codex-mobile-version-"),
+    );
+    try {
+      const ghStub = join(manualVersionDirectory, "gh");
+      writeFileSync(ghStub, "#!/bin/sh\nprintf 'v0.2.16\\n'\n");
+      chmodSync(ghStub, 0o755);
+      const manualVersionEnv = {
+        ...process.env,
+        ENABLE_IOS_BUILD: "false",
+        GITHUB_ENV: join(manualVersionDirectory, "github-env"),
+        GITHUB_EVENT_NAME: "workflow_dispatch",
+        GITHUB_OUTPUT: join(manualVersionDirectory, "github-output"),
+        GITHUB_RUN_NUMBER: "1",
+        GITHUB_REPOSITORY: "loock-ai/codex-mobile",
+        PATH: `${manualVersionDirectory}:${process.env.PATH ?? ""}`,
+        PUBLISH_NPM_REQUESTED: "true",
+      };
+      const missingVersion = spawnSync("bash", ["-c", resolveVersion], {
+        encoding: "utf8",
+        env: {
+          ...manualVersionEnv,
+          REQUESTED_VERSION: "",
+        },
+      });
+      expect(missingVersion.status).not.toBe(0);
+      expect(missingVersion.stderr).toContain(
+        "Manual npm publishing requires release_version",
+      );
+
+      const mismatchedVersion = spawnSync("bash", ["-c", resolveVersion], {
+        encoding: "utf8",
+        env: {
+          ...manualVersionEnv,
+          REQUESTED_VERSION: "v0.3.0",
+        },
+      });
+      expect(mismatchedVersion.status).not.toBe(0);
+      expect(mismatchedVersion.stderr).toContain(
+        "Manual npm publishing requires the next GitHub Release patch version: 0.2.17",
+      );
+
+      const explicitVersion = spawnSync("bash", ["-c", resolveVersion], {
+        encoding: "utf8",
+        env: {
+          ...manualVersionEnv,
+          REQUESTED_VERSION: "v0.2.17",
+        },
+      });
+      expect(explicitVersion.status).toBe(0);
+      expect(
+        readFileSync(manualVersionEnv.GITHUB_OUTPUT, "utf8"),
+      ).toContain("app_version=0.2.17");
+    } finally {
+      rmSync(manualVersionDirectory, { recursive: true, force: true });
+    }
     expect(resolveVersion).toContain("GITHUB_OUTPUT");
     expect(resolveVersion).toContain("GITHUB_ENV");
     expect(resolveVersion).toContain(
@@ -336,8 +427,12 @@ describe("移动 App 内置前端流水线", () => {
     expect(workflow.jobs.npm).toMatchObject({
       needs: "version",
       uses: "./.github/workflows/publish-npm.yml",
-      secrets: "inherit",
+      permissions: {
+        contents: "read",
+        "id-token": "write",
+      },
     });
+    expect(workflow.jobs.npm?.secrets).toBeUndefined();
     expect(workflow.jobs.npm?.if).toContain(
       "needs.version.outputs.publish_npm == 'true'",
     );

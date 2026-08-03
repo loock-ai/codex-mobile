@@ -22,6 +22,10 @@ on:
       - ".github/workflows/publish-npm.yml"
   workflow_dispatch:
     inputs:
+      release_version:
+        description: Version to build; required when publishing npm
+        required: false
+        type: string
       publish_npm:
         description: Also publish the npm gateway package
         required: false
@@ -63,17 +67,42 @@ jobs:
         env:
           ENABLE_IOS_BUILD: ${{ vars.ENABLE_IOS_BUILD }}
           GH_TOKEN: ${{ github.token }}
+          PUBLISH_NPM_REQUESTED: ${{ inputs.publish_npm }}
+          REQUESTED_VERSION: ${{ inputs.release_version }}
         run: |
           set -euo pipefail
           fallback="$(node -p "require('./package.json').version")"
+          requested="${REQUESTED_VERSION#v}"
           version="$fallback"
-          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-            latest="$(
+          if [[
+            "$GITHUB_EVENT_NAME" == "workflow_dispatch" &&
+            "$PUBLISH_NPM_REQUESTED" == "true" &&
+            -z "$requested"
+          ]]; then
+            echo "Manual npm publishing requires release_version" >&2
+            exit 1
+          fi
+          latest=""
+          if [[
+            "$GITHUB_EVENT_NAME" == "push" ||
+            (
+              "$GITHUB_EVENT_NAME" == "workflow_dispatch" &&
+              "$PUBLISH_NPM_REQUESTED" == "true"
+            )
+          ]]; then
+            if ! latest="$(
               gh api "repos/${GITHUB_REPOSITORY}/releases/latest" \
-                --jq '.tag_name' 2>/dev/null || true
-            )"
-            version="$(
-              node - "$latest" "$fallback" <<'NODE'
+                --jq '.tag_name'
+            )"; then
+              if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+                echo "Unable to resolve the latest GitHub Release for manual npm publishing" >&2
+                exit 1
+              fi
+              latest=""
+            fi
+          fi
+          next_version="$(
+            node - "$latest" "$fallback" <<'NODE'
           const latest = process.argv[2] || "";
           const fallback = process.argv[3];
           const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(latest)
@@ -82,7 +111,25 @@ jobs:
           const patch = Number(match[3]);
           process.stdout.write(`${match[1]}.${match[2]}.${patch + 1}`);
           NODE
-            )"
+          )"
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            version="$next_version"
+          elif [[ -n "$requested" ]]; then
+            version="$requested"
+          fi
+          node -e '
+            const version = process.argv[1];
+            if (!/^\d+\.\d+\.\d+$/.test(version)) {
+              throw new Error(`Invalid release version: ${version}`);
+            }
+          ' "$version"
+          if [[
+            "$GITHUB_EVENT_NAME" == "workflow_dispatch" &&
+            "$PUBLISH_NPM_REQUESTED" == "true" &&
+            "$version" != "$next_version"
+          ]]; then
+            echo "Manual npm publishing requires the next GitHub Release patch version: $next_version" >&2
+            exit 1
           fi
           echo "APP_VERSION=$version" >> "$GITHUB_ENV"
           echo "APP_VERSION_CODE=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
@@ -108,7 +155,7 @@ jobs:
               .github/workflows/publish-npm.yml; then
               publish_npm=true
             fi
-          elif [[ "${{ inputs.publish_npm }}" == "true" ]]; then
+          elif [[ "$PUBLISH_NPM_REQUESTED" == "true" ]]; then
             publish_npm=true
           fi
           echo "publish_npm=$publish_npm" >> "$GITHUB_OUTPUT"
@@ -1028,7 +1075,6 @@ jobs:
     uses: ./.github/workflows/publish-npm.yml
     with:
       app_version: ${{ needs.version.outputs.app_version }}
-    secrets: inherit
 
   release:
     name: Publish Codex Mobile Release

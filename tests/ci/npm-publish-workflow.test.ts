@@ -68,7 +68,9 @@ describe("npm 自动发布流水线", () => {
     expect(script).toContain("npm run build:package");
     expect(script).toContain("npm version");
     expect(source).toContain("inputs.app_version");
-    expect(script).toContain("npm publish --access public --provenance");
-    expect(publish?.env?.NODE_AUTH_TOKEN).toContain("secrets.NPM_TOKEN");
+    expect(script).toContain("npm publish --access public");
+    expect(script).not.toContain("--provenance");
+    expect(publish?.env?.NODE_AUTH_TOKEN).toBeUndefined();
+    expect(source).not.toContain("NPM_TOKEN");
   });
 });
