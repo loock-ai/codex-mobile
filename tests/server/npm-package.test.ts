@@ -7,7 +7,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 const packageJson = JSON.parse(
   readFileSync(resolve("package.json"), "utf8"),
@@ -15,6 +15,25 @@ const packageJson = JSON.parse(
 const cliPath = resolve("bin/codex-mobile.mjs");
 const cliSource = readFileSync(cliPath, "utf8");
 const serverSource = readFileSync(resolve("server/index.ts"), "utf8");
+const isolatedRuntimeDirectory = mkdtempSync(
+  `${tmpdir()}/codex-mobile-cli-tests-`,
+);
+const isolatedRuntimeFile = resolve(
+  isolatedRuntimeDirectory,
+  "runtime.json",
+);
+
+afterAll(() => {
+  rmSync(isolatedRuntimeDirectory, { recursive: true, force: true });
+});
+
+function isolatedCliEnv(overrides: NodeJS.ProcessEnv = {}) {
+  return {
+    ...process.env,
+    CODEX_MOBILE_RUNTIME_FILE: isolatedRuntimeFile,
+    ...overrides,
+  };
+}
 
 describe("npm 全局安装包", () => {
   it("声明公开 CLI、运行时文件和 Node 版本要求", () => {
@@ -75,13 +94,12 @@ describe("npm 全局安装包", () => {
   it("CLI 输出带访问口令的局域网链接", () => {
     const output = execFileSync(process.execPath, [cliPath, "auth", "--plain"], {
       encoding: "utf8",
-      env: {
-        ...process.env,
+      env: isolatedCliEnv({
         HOST: "0.0.0.0",
         PORT: "5173",
         CODEX_MOBILE_TOKEN: "token with spaces",
         CODEX_MOBILE_LAN_IP: "192.168.100.35",
-      },
+      }),
     });
 
     expect(output.trim()).toBe(
@@ -92,12 +110,11 @@ describe("npm 全局安装包", () => {
   it("CLI 默认生成可扫描的终端二维码", () => {
     const output = execFileSync(process.execPath, [cliPath, "auth"], {
       encoding: "utf8",
-      env: {
-        ...process.env,
+      env: isolatedCliEnv({
         PORT: "5173",
         CODEX_MOBILE_TOKEN: "secret",
         CODEX_MOBILE_LAN_IP: "192.168.100.35",
-      },
+      }),
     });
 
     expect(output).toContain("扫描二维码连接");
@@ -112,12 +129,11 @@ describe("npm 全局安装包", () => {
       [cliPath, "auth", "--plain"],
       {
         encoding: "utf8",
-        env: {
-          ...process.env,
+        env: isolatedCliEnv({
           PORT: "",
           CODEX_MOBILE_TOKEN: "secret",
           CODEX_MOBILE_LAN_IP: "192.168.100.35",
-        },
+        }),
       },
     );
 
@@ -135,13 +151,12 @@ describe("npm 全局安装包", () => {
     );
     const output = execFileSync(process.execPath, [cliPath, "auth", "--plain"], {
       encoding: "utf8",
-      env: {
-        ...process.env,
+      env: isolatedCliEnv({
         PORT: "19999",
         CODEX_MOBILE_TOKEN: "environment-token",
         CODEX_MOBILE_LAN_IP: "192.168.100.35",
         CODEX_MOBILE_RUNTIME_FILE: runtimeFile,
-      },
+      }),
     });
     const invalid = spawnSync(
       process.execPath,
@@ -171,11 +186,10 @@ describe("npm 全局安装包", () => {
   it("生成局域网链接时必须配置访问口令", () => {
     const result = spawnSync(process.execPath, [cliPath, "auth"], {
       encoding: "utf8",
-      env: {
-        ...process.env,
+      env: isolatedCliEnv({
         CODEX_MOBILE_TOKEN: "",
         CODEX_MOBILE_LAN_IP: "192.168.100.35",
-      },
+      }),
     });
 
     expect(result.status).toBe(1);
