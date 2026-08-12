@@ -65,8 +65,12 @@ import {
   buildTurnInput,
   mergeDraftImages,
   prepareImageFiles,
+  prepareAttachmentFiles,
+  isNativeImageFile,
   type DraftImage,
+  type DraftFile,
 } from "./ui/attachments";
+import { uploadFile } from "./backends/file-upload";
 import {
   effortOptionsForModel,
   normalizeModelSettings,
@@ -142,6 +146,7 @@ interface WorkspaceCommand {
   cwd?: string | null;
   draft?: string;
   draftImages?: DraftImage[];
+  draftFiles?: DraftFile[];
 }
 
 interface BackendWorkspaceProps {
@@ -156,6 +161,7 @@ interface BackendWorkspaceProps {
     backendId: string,
     draft: string,
     draftImages: DraftImage[],
+    draftFiles: DraftFile[],
   ) => void;
   command: WorkspaceCommand | null;
   refreshVersion: number;
@@ -186,6 +192,7 @@ function BackendWorkspace({
   const [active, setActive] = useState<AnyRecord | null>(null);
   const [draft, setDraft] = useState("");
   const [draftImages, setDraftImages] = useState<DraftImage[]>([]);
+  const [draftFiles, setDraftFiles] = useState<DraftFile[]>([]);
   const [imageReading, setImageReading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [steering, setSteering] = useState(false);
@@ -1050,6 +1057,10 @@ function BackendWorkspace({
     resetDraftContext();
     setDraft("");
     setDraftImages([]);
+    setDraftFiles((current) => {
+      current.forEach((file) => URL.revokeObjectURL(file.previewUrl));
+      return [];
+    });
     setOpeningThreadId(thread.id);
     setError("");
     setBusy(false);
@@ -1081,15 +1092,17 @@ function BackendWorkspace({
     event.preventDefault();
     const text = draft.trim();
     const pendingImages = draftImages;
+    const pendingFiles = draftFiles;
     if (
       imageReading ||
-      (!text && !pendingImages.length) ||
+      (!text && !pendingImages.length && !pendingFiles.length) ||
       !clientRef.current
     ) {
       return;
     }
     const draftContext = draftContextGenerationRef.current;
     if (busy) {
+      let sent = false;
       const threadId = String(active?.id ?? "");
       const turnId = activeTurnId(active);
       if (!threadId || !turnId) {
@@ -1099,10 +1112,14 @@ function BackendWorkspace({
       const clientUserMessageId =
         `steer-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const pendingSteerText =
-        text || t("{count} 张图片", { count: pendingImages.length });
+        text ||
+        (pendingFiles.length
+          ? t("{count} 个文件", { count: pendingFiles.length })
+          : t("{count} 张图片", { count: pendingImages.length }));
       invalidateImageReads();
       setDraft("");
       setDraftImages([]);
+      setDraftFiles([]);
       setSteering(true);
       setPendingSteerMessage({
         id: clientUserMessageId,
@@ -1111,15 +1128,20 @@ function BackendWorkspace({
       });
       setError("");
       try {
+        setImageReading(Boolean(pendingFiles.length));
+        const uploadedFiles = await Promise.all(
+          pendingFiles.map((file) => uploadFile(backend, file.file)),
+        );
         await clientRef.current.request(
           "turn/steer",
           buildTurnSteerParams({
             threadId,
             turnId,
-            input: buildTurnInput(text, pendingImages),
+            input: buildTurnInput(text, pendingImages, uploadedFiles),
             clientUserMessageId,
           }),
         );
+        sent = true;
       } catch (reason) {
         setPendingSteerMessage((current) =>
           clearPendingSteerForRequest(current, clientUserMessageId),
@@ -1129,22 +1151,35 @@ function BackendWorkspace({
           setDraftImages((current) =>
             mergeDraftImages(current, pendingImages)
           );
+          setDraftFiles((current) =>
+            current.length ? current : pendingFiles,
+          );
           setError(reason instanceof Error ? reason.message : String(reason));
         }
       } finally {
         if (draftContext === draftContextGenerationRef.current) {
           setSteering(false);
+          setImageReading(false);
         }
+      }
+      if (sent && draftContext === draftContextGenerationRef.current) {
+        pendingFiles.forEach((file) => URL.revokeObjectURL(file.previewUrl));
       }
       return;
     }
     invalidateImageReads();
     setDraft("");
     setDraftImages([]);
+    setDraftFiles([]);
     setBusy(true);
     const pendingTurnId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let thread = active;
+    let sent = false;
     try {
+      setImageReading(Boolean(pendingFiles.length));
+      const uploadedFiles = await Promise.all(
+        pendingFiles.map((file) => uploadFile(backend, file.file)),
+      );
       const shouldSendSettings = !thread?.id || activeSettingsSynchronized;
       if (!thread?.id) {
         const started = await clientRef.current.request<{
@@ -1195,7 +1230,7 @@ function BackendWorkspace({
       const localItem = {
         id: `local-${pendingTurnId}`,
         type: "userMessage",
-        content: buildOptimisticUserContent(text, pendingImages),
+        content: buildOptimisticUserContent(text, pendingImages, uploadedFiles),
       };
       const pendingSequence = ++pendingSequenceRef.current;
       if (draftContext === draftContextGenerationRef.current) {
@@ -1218,7 +1253,7 @@ function BackendWorkspace({
       }
       const startedTurn = await clientRef.current.request<{ turn: AnyRecord }>("turn/start", {
         threadId: thread.id,
-        input: buildTurnInput(text, pendingImages),
+        input: buildTurnInput(text, pendingImages, uploadedFiles),
         ...(shouldSendSettings && selectedModel ? { model: selectedModel } : {}),
         ...(shouldSendSettings && selectedEffort
           ? { effort: selectedEffort }
@@ -1236,6 +1271,7 @@ function BackendWorkspace({
             }
           : {}),
       });
+      sent = true;
       if (draftContext === draftContextGenerationRef.current) {
         setActive((current) => {
           if (!current) return current;
@@ -1265,8 +1301,18 @@ function BackendWorkspace({
         );
         setDraft((current) => current || text);
         setDraftImages((current) => mergeDraftImages(current, pendingImages));
+        setDraftFiles((current) =>
+          current.length ? current : pendingFiles,
+        );
         setError(reason instanceof Error ? reason.message : String(reason));
       }
+    } finally {
+      if (draftContext === draftContextGenerationRef.current) {
+        setImageReading(false);
+      }
+    }
+    if (sent && draftContext === draftContextGenerationRef.current) {
+      pendingFiles.forEach((file) => URL.revokeObjectURL(file.previewUrl));
     }
   }
 
@@ -1279,15 +1325,24 @@ function BackendWorkspace({
     );
     setImageReading(true);
     try {
+      const selected = Array.from(files);
+      const imageFiles = selected.filter(isNativeImageFile);
+      const attachmentFiles = selected.filter((file) => !isNativeImageFile(file));
       const result = await prepareImageFiles(
-        files,
+        imageFiles,
         draftImages.length,
         undefined,
         existingBytes,
       );
       if (!imageReadGenerationRef.current.isCurrent(generation)) return;
+      const attachmentResult = prepareAttachmentFiles(
+        attachmentFiles,
+        draftFiles.length,
+      );
       setDraftImages((current) => mergeDraftImages(current, result.images));
-      if (result.errors.length) setError(result.errors.join("；"));
+      setDraftFiles((current) => [...current, ...attachmentResult.files].slice(0, 4));
+      const errors = [...result.errors, ...attachmentResult.errors];
+      if (errors.length) setError(errors.join("；"));
       else setError("");
     } finally {
       if (imageReadGenerationRef.current.isCurrent(generation)) {
@@ -1501,6 +1556,7 @@ function BackendWorkspace({
     cwd: string | null = null,
     nextDraft = "",
     nextDraftImages: DraftImage[] = [],
+    nextDraftFiles: DraftFile[] = [],
   ) => {
     const savedCwd = window.localStorage.getItem(
       `codex-mobile:new-chat-project:${backend.id}`,
@@ -1516,6 +1572,7 @@ function BackendWorkspace({
     setOpeningThreadId("");
     setDraft(nextDraft);
     setDraftImages(nextDraftImages);
+    setDraftFiles(nextDraftFiles);
     setConversationLoadState("ready");
     setConversationLoadError("");
     resetOlderTurns();
@@ -1585,6 +1642,7 @@ function BackendWorkspace({
         command.cwd ?? null,
         command.draft ?? "",
         command.draftImages ?? [],
+        command.draftFiles ?? [],
       );
     } else if (command.type === "load-project" && command.cwd) {
       void loadAllProjectThreads(command.cwd);
@@ -1613,6 +1671,7 @@ function BackendWorkspace({
           error={error}
           draft={draft}
           draftImages={draftImages}
+          draftFiles={draftFiles}
           imageReading={imageReading}
           busy={busy}
           steering={steering}
@@ -1632,7 +1691,7 @@ function BackendWorkspace({
           imageInputRef={imageInputRef}
           onBack={onOpenSidebar}
           onNewChatBackendChange={(backendId) =>
-            onSwitchNewChatBackend(backendId, draft, draftImages)
+            onSwitchNewChatBackend(backendId, draft, draftImages, draftFiles)
           }
           onNewChatProjectChange={chooseNewChatProject}
           onPin={togglePinned}
@@ -1645,6 +1704,13 @@ function BackendWorkspace({
             setDraftImages((current) =>
               current.filter((entry) => entry.id !== imageId),
             )
+          }
+          onRemoveFile={(fileId) =>
+            setDraftFiles((current) => {
+              const removed = current.find((entry) => entry.id === fileId);
+              if (removed) URL.revokeObjectURL(removed.previewUrl);
+              return current.filter((entry) => entry.id !== fileId);
+            })
           }
           onSelectImages={selectImages}
           onOpenAgentSettings={() => setPicker("agent")}
@@ -2188,6 +2254,7 @@ function ConfiguredApp({
       backendId: string,
       currentDraft: string,
       currentDraftImages: DraftImage[],
+      currentDraftFiles: DraftFile[],
     ) => {
       const target = mountedBackends.find(
         (backend) => backend.id === backendId,
@@ -2202,6 +2269,7 @@ function ConfiguredApp({
         cwd: null,
         draft: currentDraft,
         draftImages: currentDraftImages,
+        draftFiles: currentDraftFiles,
       });
     },
     [mountedBackends, selectBackend],

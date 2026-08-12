@@ -42,6 +42,12 @@ try {
       process.env.CODEX_MOBILE_VERSION ??
       process.env.npm_package_version ??
       "0.2.0",
+    uploadDir:
+      process.env.CODEX_MOBILE_UPLOAD_DIR ??
+      join(
+        process.env.CODEX_HOME || join(process.env.HOME || "", ".codex"),
+        "codex-mobile-uploads",
+      ),
     readProjectDirectories: () =>
       readCodexProjectDirectories(
         join(

@@ -177,6 +177,7 @@ CODEX_MOBILE_SERVE_STATIC=false codex-mobile start
 | `CODEX_MOBILE_TOKEN` | 空 | 访问口令；非回环监听时必填 |
 | `CODEX_MOBILE_HOST_ID` | 自动生成 | 稳定的设备标识 |
 | `CODEX_MOBILE_HOST_NAME` | 主机名 | 客户端展示的设备名称 |
+| `CODEX_MOBILE_UPLOAD_DIR` | `~/.codex/codex-mobile-uploads` | 图片以外附件的上传目录 |
 | `CODEX_MOBILE_SERVE_STATIC` | `true` | 设为 `false` 启用 gateway-only |
 | `CODEX_APP_SERVER_MODE` | `managed` | `managed` 或 `external` |
 | `CODEX_APP_SERVER_PORT` | `18765` | Managed app-server 回环端口 |

@@ -8,11 +8,7 @@ import {
 import { AppServerClient } from "../../app-server/client";
 import type { OlderTurnsLoadState } from "../../app-server/thread-session";
 import type { BackendConfig } from "../../backends/types";
-import {
-  MAX_DRAFT_IMAGES,
-  MAX_TOTAL_IMAGE_BYTES,
-  type DraftImage,
-} from "../../ui/attachments";
+import { type DraftFile, type DraftImage } from "../../ui/attachments";
 import {
   AppIcon,
   titleOf,
@@ -123,6 +119,7 @@ export function ConversationPage({
   error,
   draft,
   draftImages,
+  draftFiles,
   imageReading,
   busy,
   steering,
@@ -146,6 +143,7 @@ export function ConversationPage({
   onLoadOlderTurns,
   onSubmit,
   onRemoveImage,
+  onRemoveFile,
   onSelectImages,
   onOpenAgentSettings,
   onOpenPermissionSettings,
@@ -165,6 +163,7 @@ export function ConversationPage({
   error: string;
   draft: string;
   draftImages: DraftImage[];
+  draftFiles: DraftFile[];
   imageReading: boolean;
   busy: boolean;
   steering: boolean;
@@ -188,6 +187,7 @@ export function ConversationPage({
   onLoadOlderTurns: () => Promise<boolean>;
   onSubmit: (event: FormEvent) => void;
   onRemoveImage: (imageId: string) => void;
+  onRemoveFile: (fileId: string) => void;
   onSelectImages: (files: FileList | null) => Promise<void>;
   onOpenAgentSettings: () => void;
   onOpenPermissionSettings: () => void;
@@ -199,7 +199,7 @@ export function ConversationPage({
   const [actionsOpen, setActionsOpen] = useState(false);
   const turns = groupConversationTurns(active.turns ?? []);
   const isNewChat = !active.id;
-  const hasDraft = Boolean(draft.trim() || draftImages.length);
+  const hasDraft = Boolean(draft.trim() || draftImages.length || draftFiles.length);
   const canSteer = busy && steerable && hasDraft;
   const realtime = useRealtimeConversation({
     client,
@@ -480,6 +480,42 @@ export function ConversationPage({
             ))}
           </div>
         )}
+        {draftFiles.length > 0 && (
+          <div className="draft-files" aria-label={t("待发送文件")}>
+            {draftFiles.map((file) => (
+              <figure key={file.id}>
+                {file.type.startsWith("video/") ? (
+                  <video
+                    src={file.previewUrl}
+                    aria-label={t("待发送 {name}", { name: file.name })}
+                    controls
+                    preload="metadata"
+                  />
+                ) : file.type.startsWith("audio/") ? (
+                  <div className="draft-file-audio">
+                    <span aria-hidden="true">♪</span>
+                    <audio src={file.previewUrl} controls preload="metadata" />
+                  </div>
+                ) : (
+                  <div className="draft-file-glyph" aria-hidden="true">
+                    <span>
+                      {file.name.split(".").at(-1)?.slice(0, 5).toUpperCase() || "FILE"}
+                    </span>
+                  </div>
+                )}
+                <figcaption title={file.name}>{file.name}</figcaption>
+                <button
+                  type="button"
+                  className="draft-image-remove"
+                  aria-label={t("移除 {name}", { name: file.name })}
+                  onClick={() => onRemoveFile(file.id)}
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
+              </figure>
+            ))}
+          </div>
+        )}
         {previewImage && (
           <ImagePreviewSheet
             src={previewImage.url}
@@ -490,7 +526,7 @@ export function ConversationPage({
         )}
         {imageReading && (
           <div className="draft-image-reading" role="status" aria-live="polite">
-            {t("正在读取图片…")}
+            {t("正在处理附件…")}
           </div>
         )}
         <div className="chips">
@@ -517,9 +553,9 @@ export function ConversationPage({
             ref={imageInputRef}
             className="visually-hidden"
             type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
+            accept="*/*"
             multiple
-            aria-label={t("选择图片")}
+            aria-label={t("选择图片或视频")}
             onChange={(event) => {
               const input = event.currentTarget;
               void onSelectImages(input.files).finally(() => {
@@ -534,10 +570,7 @@ export function ConversationPage({
             disabled={
               !interactive ||
               realtimeActive ||
-              imageReading ||
-              draftImages.length >= MAX_DRAFT_IMAGES ||
-              draftImages.reduce((total, image) => total + image.size, 0) >=
-                MAX_TOTAL_IMAGE_BYTES
+              imageReading
             }
             onClick={() => imageInputRef.current?.click()}
           >

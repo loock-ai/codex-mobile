@@ -2,7 +2,7 @@ import { createRef, type FormEvent } from "react";
 import { fireEvent, render, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ConversationPage } from "../../src/features/conversation/ConversationPage";
-import type { DraftImage } from "../../src/ui/attachments";
+import type { DraftFile, DraftImage } from "../../src/ui/attachments";
 
 function renderConversation(
   olderTurnsState: "idle" | "loading" | "error" | "exhausted",
@@ -14,6 +14,7 @@ function renderConversation(
     steerable?: boolean;
     pendingSteerText?: string;
     draftImages?: DraftImage[];
+    draftFiles?: DraftFile[];
     onSubmit?: (event: FormEvent) => void;
   } = {},
   onRetry = vi.fn(),
@@ -39,6 +40,7 @@ function renderConversation(
       error=""
       draft={composer.draft ?? ""}
       draftImages={composer.draftImages ?? []}
+      draftFiles={composer.draftFiles ?? []}
       imageReading={false}
       busy={composer.busy ?? false}
       steering={composer.steering ?? false}
@@ -62,6 +64,7 @@ function renderConversation(
       onLoadOlderTurns={onLoadOlderTurns}
       onSubmit={onSubmit}
       onRemoveImage={() => undefined}
+      onRemoveFile={() => undefined}
       onSelectImages={async () => undefined}
       onOpenAgentSettings={() => undefined}
       onOpenPermissionSettings={() => undefined}
@@ -256,5 +259,37 @@ describe("会话详情历史分页", () => {
     expect(
       within(preview).getByRole("img", { name: "待发送 draft.png" }),
     ).not.toBeNull();
+  });
+
+  it("待发送视频可播放，其他文件显示紧凑文件卡片", () => {
+    const { container } = renderConversation(
+      "exhausted",
+      undefined,
+      {
+        draftFiles: [
+          {
+            id: "video",
+            name: "演示.mp4",
+            type: "video/mp4",
+            size: 5,
+            file: new File(["video"], "演示.mp4", { type: "video/mp4" }),
+            previewUrl: "blob:video",
+          },
+          {
+            id: "pdf",
+            name: "需求.pdf",
+            type: "application/pdf",
+            size: 3,
+            file: new File(["pdf"], "需求.pdf", { type: "application/pdf" }),
+            previewUrl: "blob:pdf",
+          },
+        ],
+      },
+    );
+    const view = within(container);
+
+    expect(view.getByLabelText("待发送 演示.mp4").tagName).toBe("VIDEO");
+    expect(view.getByText("PDF")).not.toBeNull();
+    expect(view.getByRole("button", { name: "移除 需求.pdf" })).not.toBeNull();
   });
 });

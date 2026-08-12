@@ -1,5 +1,6 @@
 import { createServer, type Server } from "node:http";
-import { readFile } from "node:fs/promises";
+import { mkdir, open, readFile, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { extname, join, normalize } from "node:path";
 import WebSocket, { WebSocketServer } from "ws";
 
@@ -16,6 +17,7 @@ export interface GatewayOptions {
   gatewayVersion?: string;
   appServerReady?: () => Promise<boolean>;
   readProjectDirectories?: () => Promise<string[]>;
+  uploadDir?: string;
 }
 
 export interface Gateway {
@@ -52,8 +54,11 @@ function applyCors(
 ) {
   if (!origin) return;
   response.setHeader("access-control-allow-origin", origin);
-  response.setHeader("access-control-allow-methods", "GET, OPTIONS");
-  response.setHeader("access-control-allow-headers", "content-type");
+  response.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
+  response.setHeader(
+    "access-control-allow-headers",
+    "content-type, x-codex-file-name",
+  );
   response.setHeader("vary", "Origin");
 }
 
@@ -65,6 +70,7 @@ export async function createGateway(options: GatewayOptions): Promise<Gateway> {
       "/api/status",
       "/api/host",
       "/api/projects",
+      "/api/uploads/file",
     ].includes(url.pathname);
     const apiRequest =
       url.pathname === "/api" || url.pathname.startsWith("/api/");
@@ -128,6 +134,78 @@ export async function createGateway(options: GatewayOptions): Promise<Gateway> {
         response.statusCode = 500;
         response.end("无法读取 Codex 本地项目");
       }
+      return;
+    }
+    if (url.pathname === "/api/uploads/file" && request.method === "POST") {
+      const type = String(request.headers["content-type"] ?? "").split(";", 1)[0];
+      if (!options.uploadDir) {
+        response.statusCode = 503;
+        response.end("Upload directory unavailable");
+        return;
+      }
+      const declaredSize = Number(request.headers["content-length"] ?? 0);
+      const maxBytes = 100 * 1024 * 1024;
+      if (declaredSize > maxBytes) {
+        response.statusCode = 413;
+        response.end("File exceeds 100 MB");
+        return;
+      }
+      const rawName = Array.isArray(request.headers["x-codex-file-name"])
+        ? request.headers["x-codex-file-name"][0]
+        : request.headers["x-codex-file-name"];
+      let name = "attachment";
+      if (rawName) {
+        try {
+          name = decodeURIComponent(rawName);
+        } catch {
+          name = rawName;
+        }
+      }
+      name = name.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 240) || "attachment";
+      const extension = extname(name)
+        .slice(0, 20)
+        .replace(/[^.a-zA-Z0-9_-]/g, "");
+      try {
+        await mkdir(options.uploadDir, { recursive: true });
+      } catch {
+        response.statusCode = 500;
+        response.end("Unable to prepare upload directory");
+        return;
+      }
+      const filePath = join(options.uploadDir, `${Date.now()}-${randomUUID()}${extension}`);
+      let file;
+      try {
+        file = await open(filePath, "wx");
+      } catch {
+        response.statusCode = 500;
+        response.end("Unable to create upload file");
+        return;
+      }
+      let size = 0;
+      try {
+        for await (const chunk of request) {
+          const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          size += buffer.byteLength;
+          if (size > maxBytes) throw new Error("FILE_TOO_LARGE");
+          await file.write(buffer);
+        }
+      } catch (error) {
+        await file.close();
+        await rm(filePath, { force: true });
+        response.statusCode = error instanceof Error && error.message === "FILE_TOO_LARGE" ? 413 : 400;
+        response.end("Unable to upload file");
+        return;
+      }
+      await file.close();
+      if (!size) {
+        await rm(filePath, { force: true });
+        response.statusCode = 400;
+        response.end("File is empty");
+        return;
+      }
+      response.statusCode = 201;
+      response.setHeader("content-type", "application/json; charset=utf-8");
+      response.end(JSON.stringify({ path: filePath, name, type, size }));
       return;
     }
     if (apiRequest) {

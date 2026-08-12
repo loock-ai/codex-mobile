@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -226,6 +226,46 @@ describe("透明网关", () => {
       gatewayVersion: "0.2.0",
       appServerReady: false,
     });
+  });
+
+  it("鉴权后把任意文件上传到受控目录并返回机器路径", async () => {
+    const uploadDir = await mkdtemp(join(tmpdir(), "codex-mobile-file-"));
+    cleanups.push(() => rm(uploadDir, { recursive: true, force: true }));
+    const gateway = await createGateway({
+      host: "127.0.0.1",
+      port: 0,
+      mode: "external",
+      upstreamUrl: "ws://127.0.0.1:9",
+      staticDir: null,
+      accessToken: "upload-token",
+      uploadDir,
+    });
+    cleanups.push(async () => gateway.close());
+
+    const denied = await fetch(
+      `http://127.0.0.1:${gateway.port}/api/uploads/file`,
+      { method: "POST", body: "pdf" },
+    );
+    const uploaded = await fetch(
+      `http://127.0.0.1:${gateway.port}/api/uploads/file?token=upload-token`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/pdf",
+          "x-codex-file-name": encodeURIComponent("需求文档.pdf"),
+        },
+        body: "pdf",
+      },
+    );
+
+    expect(denied.status).toBe(401);
+    expect(uploaded.status).toBe(201);
+    const result = (await uploaded.json()) as { path: string; name: string; size: number };
+    expect(result.name).toBe("需求文档.pdf");
+    expect(result.size).toBe(3);
+    expect(result.path.startsWith(uploadDir)).toBe(true);
+    expect(result.path.endsWith(".pdf")).toBe(true);
+    expect(await readFile(result.path, "utf8")).toBe("pdf");
   });
 
   it("控制接口支持预检并允许任意跨源请求", async () => {

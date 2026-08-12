@@ -1,6 +1,8 @@
 export const MAX_DRAFT_IMAGES = 4;
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024;
+export const MAX_DRAFT_FILES = 4;
+export const MAX_FILE_BYTES = 100 * 1024 * 1024;
 
 const acceptedImageTypes = new Set([
   "image/png",
@@ -9,12 +11,32 @@ const acceptedImageTypes = new Set([
   "image/gif",
 ]);
 
+export function isNativeImageFile(file: Pick<File, "type">) {
+  return acceptedImageTypes.has(file.type);
+}
+
 export interface DraftImage {
   id: string;
   name: string;
   type: string;
   size: number;
   url: string;
+}
+
+export interface DraftFile {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  file: File;
+  previewUrl: string;
+}
+
+export interface UploadedFile {
+  name: string;
+  type: string;
+  size: number;
+  path: string;
 }
 
 type ImageReader = (file: File) => Promise<string>;
@@ -107,6 +129,41 @@ export async function prepareImageFiles(
   return { images, errors };
 }
 
+export function prepareAttachmentFiles(
+  files: Iterable<File> | ArrayLike<File>,
+  existingCount: number,
+  createPreview: (file: File) => string = (file) => URL.createObjectURL(file),
+) {
+  const prepared: DraftFile[] = [];
+  const errors: string[] = [];
+  const available = Math.max(0, MAX_DRAFT_FILES - existingCount);
+  let quantityErrorAdded = false;
+
+  for (const [index, file] of Array.from(files).entries()) {
+    if (file.size > MAX_FILE_BYTES) {
+      errors.push(t("{name} 超过 100 MB", { name: file.name }));
+      continue;
+    }
+    if (prepared.length >= available) {
+      if (!quantityErrorAdded) {
+        errors.push(t("最多上传 {count} 个文件", { count: MAX_DRAFT_FILES }));
+        quantityErrorAdded = true;
+      }
+      continue;
+    }
+    prepared.push({
+      id: `draft-file-${Date.now()}-${index}-${file.name}`,
+      name: file.name,
+      type: file.type || "application/octet-stream",
+      size: file.size,
+      file,
+      previewUrl: createPreview(file),
+    });
+  }
+
+  return { files: prepared, errors };
+}
+
 function draftImageIdentity(image: DraftImage) {
   return `${image.name}\u0000${image.type}\u0000${image.size}\u0000${image.url}`;
 }
@@ -134,7 +191,15 @@ export function mergeDraftImages(
   return merged;
 }
 
-export function buildTurnInput(text: string, images: DraftImage[]) {
+function uploadedFileInput(file: UploadedFile) {
+  return `${t("已上传文件：{name}", { name: file.name })}\n${t("本机路径：{path}", { path: file.path })}`;
+}
+
+export function buildTurnInput(
+  text: string,
+  images: DraftImage[],
+  files: UploadedFile[] = [],
+) {
   return [
     ...(text
       ? [{ type: "text" as const, text, text_elements: [] as unknown[] }]
@@ -143,18 +208,28 @@ export function buildTurnInput(text: string, images: DraftImage[]) {
       type: "image" as const,
       url: image.url,
     })),
+    ...files.map((file) => ({
+      type: "text" as const,
+      text: uploadedFileInput(file),
+      text_elements: [] as unknown[],
+    })),
   ];
 }
 
 export function buildOptimisticUserContent(
   text: string,
   images: DraftImage[],
+  files: UploadedFile[] = [],
 ) {
   return [
     ...(text ? [{ type: "text" as const, text }] : []),
     ...images.map((image) => ({
       type: "image" as const,
       url: image.url,
+    })),
+    ...files.map((file) => ({
+      type: "text" as const,
+      text: t("文件：{name}", { name: file.name }),
     })),
   ];
 }

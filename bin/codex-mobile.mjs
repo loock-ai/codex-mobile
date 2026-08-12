@@ -61,6 +61,7 @@ function printHelp() {
   PORT                    监听端口，默认 18766
   CODEX_MOBILE_TOKEN      局域网访问口令
   CODEX_MOBILE_HOST_NAME  设备显示名称
+  CODEX_MOBILE_UPLOAD_DIR 文件上传目录，默认 ~/.codex/codex-mobile-uploads
   CODEX_APP_SERVER_MODE   managed 或 external
 
 局域网启动示例：

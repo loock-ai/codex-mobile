@@ -3,11 +3,13 @@ import {
   MAX_DRAFT_IMAGES,
   MAX_IMAGE_BYTES,
   MAX_TOTAL_IMAGE_BYTES,
+  MAX_FILE_BYTES,
   ImageReadGeneration,
   buildOptimisticUserContent,
   buildTurnInput,
   mergeDraftImages,
   prepareImageFiles,
+  prepareAttachmentFiles,
 } from "../../src/ui/attachments";
 
 const tinyPng = "data:image/png;base64,iVBORw0KGgo=";
@@ -150,6 +152,56 @@ describe("图片输入", () => {
     expect(buildOptimisticUserContent("请查看", [image])).toEqual([
       { type: "text", text: "请查看" },
       { type: "image", url: tinyPng },
+    ]);
+  });
+
+  it("接受视频、PDF 和无 MIME 文件，并限制单文件大小与附件数量", () => {
+    const video = new File(["video"], "演示.mp4", { type: "video/mp4" });
+    const pdf = new File(["pdf"], "说明.pdf", { type: "application/pdf" });
+    const source = new File(["code"], "main.rs");
+    const accepted = prepareAttachmentFiles(
+      [video, pdf, source],
+      0,
+      (file) => `blob:${file.name}`,
+    );
+    expect(accepted.errors).toEqual([]);
+    expect(accepted.files).toEqual([
+      expect.objectContaining({
+        name: "演示.mp4",
+        type: "video/mp4",
+        size: 5,
+        previewUrl: "blob:演示.mp4",
+        file: video,
+      }),
+      expect.objectContaining({ name: "说明.pdf", type: "application/pdf" }),
+      expect.objectContaining({ name: "main.rs", type: "application/octet-stream" }),
+    ]);
+
+    const huge = new File(["video"], "超大.mp4", { type: "video/mp4" });
+    Object.defineProperty(huge, "size", { value: MAX_FILE_BYTES + 1 });
+    expect(prepareAttachmentFiles([huge], 0).errors.join(" ")).toContain("100 MB");
+    expect(prepareAttachmentFiles([video], 4).errors.join(" ")).toContain(
+      "最多上传 4 个文件",
+    );
+  });
+
+  it("把已上传文件的机器路径加入发送输入和乐观消息", () => {
+    const file = {
+      name: "需求.pdf",
+      type: "application/pdf",
+      size: 5,
+      path: "/tmp/codex-mobile/需求.pdf",
+    };
+    expect(buildTurnInput("总结这个文件", [], [file])).toEqual([
+      { type: "text", text: "总结这个文件", text_elements: [] },
+      {
+        type: "text",
+        text: "已上传文件：需求.pdf\n本机路径：/tmp/codex-mobile/需求.pdf",
+        text_elements: [],
+      },
+    ]);
+    expect(buildOptimisticUserContent("", [], [file])).toEqual([
+      { type: "text", text: "文件：需求.pdf" },
     ]);
   });
 });

@@ -386,6 +386,17 @@ button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; 
 .draft-image-remove > span { width: 22px; height: 22px; border: 2px solid #fff; border-radius: 50%; background: #111; display: grid; place-items: center; padding-bottom: 2px; font-size: 16px; line-height: 1; }
 .draft-image-remove:focus-visible { outline: 2px solid #1976f3; outline-offset: -8px; }
 .draft-image-reading { padding: 4px 12px 9px; color: #777; font-size: 12px; }
+.draft-files { display: flex; gap: 8px; max-width: 100%; overflow-x: auto; padding: 17px 22px 9px 10px; scrollbar-width: none; }
+.draft-files::-webkit-scrollbar { display: none; }
+.draft-files figure { position: relative; flex: 0 0 168px; width: 168px; margin: 0; overflow: visible; border-radius: 15px; background: #ededed; box-shadow: 0 1px 5px rgba(0,0,0,.08); }
+.draft-files video { display: block; width: 168px; height: 94px; border-radius: 15px 15px 8px 8px; background: #111; object-fit: contain; }
+.draft-files figcaption { overflow: hidden; padding: 6px 9px 7px; color: #555; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.draft-file-glyph { position: relative; height: 72px; display: grid; place-items: center; border-radius: 15px 15px 8px 8px; background: #e4e4e4; }
+.draft-file-glyph::before { content: ""; position: absolute; top: 13px; left: 50%; width: 34px; height: 42px; transform: translateX(-50%); border: 1.5px solid #777; border-radius: 5px; background: #f8f8f8; }
+.draft-file-glyph span { position: relative; z-index: 1; max-width: 31px; overflow: hidden; color: #555; font: 700 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; }
+.draft-file-audio { height: 72px; display: grid; grid-template-columns: 28px minmax(0,1fr); align-items: center; gap: 6px; padding: 0 9px; border-radius: 15px 15px 8px 8px; background: #e4e4e4; }
+.draft-file-audio > span { width: 28px; height: 28px; border-radius: 50%; background: #111; color: #fff; display: grid; place-items: center; font-size: 15px; }
+.draft-file-audio audio { width: 100%; min-width: 0; height: 34px; }
 .visually-hidden { position: fixed !important; width: 1px !important; height: 1px !important; overflow: hidden !important; clip: rect(0 0 0 0) !important; clip-path: inset(50%) !important; white-space: nowrap !important; }
 .chips { display: flex; gap: 7px; padding: 0 10px 7px; overflow: hidden; }
 .chips button { min-width: 0; max-width: 52%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; border-radius: 18px; background: #e9e9e9; padding: 7px 11px; font-size: 12px; font-weight: 650; }
