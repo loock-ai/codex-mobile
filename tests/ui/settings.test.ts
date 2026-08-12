@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   approvalPolicyDescription,
   approvalPolicyLabel,
+  defaultNewChatPermissionMode,
   effortOptionsForModel,
   modelOptionMeta,
   normalizeModelSettings,
@@ -178,5 +179,26 @@ describe("移动端模型与审批设置", () => {
         "user",
       ),
     ).toBe("full-access");
+  });
+
+  it("新对话默认使用完全访问权限，并在不可用时回退默认权限", () => {
+    expect(
+      defaultNewChatPermissionMode([
+        { id: ":workspace", allowed: true },
+        { id: ":danger-full-access", allowed: true },
+      ]),
+    ).toMatchObject({
+      permissions: ":danger-full-access",
+      approvalPolicy: "never",
+      approvalsReviewer: "user",
+    });
+    expect(
+      defaultNewChatPermissionMode([
+        { id: ":workspace", allowed: true },
+      ]),
+    ).toMatchObject({
+      permissions: ":workspace",
+      approvalPolicy: "on-request",
+    });
   });
 });

@@ -73,6 +73,7 @@ import {
 import { uploadFile } from "./backends/file-upload";
 import {
   effortOptionsForModel,
+  defaultNewChatPermissionMode,
   normalizeModelSettings,
   permissionModeFromSettings,
   permissionModesFromProfiles,
@@ -80,6 +81,7 @@ import {
   speedOptionsForModel,
   type ApprovalPolicy,
   type ApprovalsReviewer,
+  type PermissionMode,
   type PermissionModeId,
 } from "./ui/settings";
 import {
@@ -195,6 +197,9 @@ function BackendWorkspace({
   const [draftFiles, setDraftFiles] = useState<DraftFile[]>([]);
   const [imageReading, setImageReading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [startingThreadContext, setStartingThreadContext] = useState<
+    number | null
+  >(null);
   const [steering, setSteering] = useState(false);
   const [pendingSteerMessage, setPendingSteerMessage] =
     useState<PendingSteerMessage | null>(null);
@@ -211,6 +216,8 @@ function BackendWorkspace({
     useState<ApprovalPolicy>("on-request");
   const [selectedApprovalsReviewer, setSelectedApprovalsReviewer] =
     useState<ApprovalsReviewer>("user");
+  const [newChatPermissionMode, setNewChatPermissionMode] =
+    useState<PermissionMode | null>(null);
   const [activeSettingsSynchronized, setActiveSettingsSynchronized] =
     useState(true);
   const [openingThreadId, setOpeningThreadId] = useState("");
@@ -1064,6 +1071,8 @@ function BackendWorkspace({
     setOpeningThreadId(thread.id);
     setError("");
     setBusy(false);
+    setStartingThreadContext(null);
+    setNewChatPermissionMode(null);
     setSteering(false);
     setConversationLoadError("");
     setConversationLoadState("loading");
@@ -1101,7 +1110,10 @@ function BackendWorkspace({
       return;
     }
     const draftContext = draftContextGenerationRef.current;
-    if (busy) {
+    const conversationBusy = active?.id
+      ? busy
+      : startingThreadContext === draftContextGenerationRef.current;
+    if (conversationBusy) {
       let sent = false;
       const threadId = String(active?.id ?? "");
       const turnId = activeTurnId(active);
@@ -1172,6 +1184,7 @@ function BackendWorkspace({
     setDraftImages([]);
     setDraftFiles([]);
     setBusy(true);
+    if (!active?.id) setStartingThreadContext(draftContext);
     const pendingTurnId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let thread = active;
     let sent = false;
@@ -1181,6 +1194,18 @@ function BackendWorkspace({
         pendingFiles.map((file) => uploadFile(backend, file.file)),
       );
       const shouldSendSettings = !thread?.id || activeSettingsSynchronized;
+      const effectivePermission =
+        !thread?.id && newChatPermissionMode
+          ? newChatPermissionMode.permissions
+          : selectedPermission;
+      const effectiveApprovalPolicy =
+        !thread?.id && newChatPermissionMode
+          ? newChatPermissionMode.approvalPolicy
+          : selectedApprovalPolicy;
+      const effectiveApprovalsReviewer =
+        !thread?.id && newChatPermissionMode
+          ? newChatPermissionMode.approvalsReviewer
+          : selectedApprovalsReviewer;
       if (!thread?.id) {
         const started = await clientRef.current.request<{
           thread: AnyRecord;
@@ -1194,9 +1219,9 @@ function BackendWorkspace({
           cwd: thread?.cwd ?? null,
           ...(selectedModel ? { model: selectedModel } : {}),
           ...(selectedServiceTier ? { serviceTier: selectedServiceTier } : {}),
-          ...(selectedPermission ? { permissions: selectedPermission } : {}),
-          approvalPolicy: selectedApprovalPolicy,
-          approvalsReviewer: selectedApprovalsReviewer,
+          ...(effectivePermission ? { permissions: effectivePermission } : {}),
+          approvalPolicy: effectiveApprovalPolicy,
+          approvalsReviewer: effectiveApprovalsReviewer,
         });
         thread = started.thread;
         activeThreadTargetRef.current = thread.id;
@@ -1211,6 +1236,7 @@ function BackendWorkspace({
           started.serviceTier ?? selectedServiceTier,
         );
         if (draftContext === draftContextGenerationRef.current) {
+          setStartingThreadContext(null);
           if (started.model) setSelectedModel(started.model);
           setSelectedEffort(startedSettings.effort);
           setSelectedServiceTier(startedSettings.serviceTier);
@@ -1261,13 +1287,13 @@ function BackendWorkspace({
         ...(shouldSendSettings && selectedServiceTier
           ? { serviceTier: selectedServiceTier }
           : {}),
-        ...(shouldSendSettings && selectedPermission
-          ? { permissions: selectedPermission }
+        ...(shouldSendSettings && effectivePermission
+          ? { permissions: effectivePermission }
           : {}),
         ...(shouldSendSettings
           ? {
-              approvalPolicy: selectedApprovalPolicy,
-              approvalsReviewer: selectedApprovalsReviewer,
+              approvalPolicy: effectiveApprovalPolicy,
+              approvalsReviewer: effectiveApprovalsReviewer,
             }
           : {}),
       });
@@ -1294,6 +1320,7 @@ function BackendWorkspace({
       }
       if (draftContext === draftContextGenerationRef.current) {
         setBusy(false);
+        setStartingThreadContext(null);
         setActive((current) =>
           current && current.id === thread?.id
             ? removePendingTurn(current, pendingTurnId)
@@ -1484,10 +1511,14 @@ function BackendWorkspace({
   const permissionModes = permissionModesFromProfiles(
     permissionProfiles as Array<{ id: string; allowed?: boolean }>,
   );
+  const effectivePermissionMode =
+    !active?.id && newChatPermissionMode
+      ? newChatPermissionMode
+      : null;
   const selectedPermissionModeId = permissionModeFromSettings(
-    selectedPermission,
-    selectedApprovalPolicy,
-    selectedApprovalsReviewer,
+    effectivePermissionMode?.permissions ?? selectedPermission,
+    effectivePermissionMode?.approvalPolicy ?? selectedApprovalPolicy,
+    effectivePermissionMode?.approvalsReviewer ?? selectedApprovalsReviewer,
   );
   const selectedPermissionMode = permissionModes.find(
     (mode) => mode.id === selectedPermissionModeId,
@@ -1519,6 +1550,7 @@ function BackendWorkspace({
     setSelectedPermission(mode.permissions);
     setSelectedApprovalPolicy(mode.approvalPolicy);
     setSelectedApprovalsReviewer(mode.approvalsReviewer);
+    if (!active?.id) setNewChatPermissionMode(mode);
     setPicker(null);
   };
   const approval = requests[0] ?? null;
@@ -1569,7 +1601,16 @@ function BackendWorkspace({
     openSequenceRef.current += 1;
     activeThreadTargetRef.current = null;
     resetDraftContext();
+    const defaultPermissionMode =
+      defaultNewChatPermissionMode(
+        permissionProfiles as Array<{ id: string; allowed?: boolean }>,
+      );
     setOpeningThreadId("");
+    setBusy(false);
+    setStartingThreadContext(null);
+    setSteering(false);
+    setImageReading(false);
+    setError("");
     setDraft(nextDraft);
     setDraftImages(nextDraftImages);
     setDraftFiles(nextDraftFiles);
@@ -1577,6 +1618,12 @@ function BackendWorkspace({
     setConversationLoadError("");
     resetOlderTurns();
     setActiveSettingsSynchronized(true);
+    if (defaultPermissionMode) {
+      setNewChatPermissionMode(defaultPermissionMode);
+      setSelectedPermission(defaultPermissionMode.permissions);
+      setSelectedApprovalPolicy(defaultPermissionMode.approvalPolicy);
+      setSelectedApprovalsReviewer(defaultPermissionMode.approvalsReviewer);
+    }
     setActive({
       id: "",
       turns: [],
@@ -1654,6 +1701,10 @@ function BackendWorkspace({
     }
   }, [backend.id, command, projectOptions]);
 
+  const conversationBusy = active?.id
+    ? busy
+    : startingThreadContext === draftContextGenerationRef.current;
+
   return (
     <main className="app-shell">
       {active ? (
@@ -1673,7 +1724,7 @@ function BackendWorkspace({
           draftImages={draftImages}
           draftFiles={draftFiles}
           imageReading={imageReading}
-          busy={busy}
+          busy={conversationBusy}
           steering={steering}
           steerable={Boolean(activeTurnId(active))}
           pendingSteerText={

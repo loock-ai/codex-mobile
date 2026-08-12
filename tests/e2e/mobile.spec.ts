@@ -1253,6 +1253,7 @@ test("新会话启动期间返回列表不会被迟到响应重新拉回且任�
   page,
 }) => {
   await page.addInitScript(() => {
+    localStorage.setItem("codex-mobile:language", "zh-CN");
     const now = Math.floor(Date.now() / 1000);
     class DelayedStartSocket extends EventTarget {
       static OPEN = 1;
@@ -1284,7 +1285,10 @@ test("新会话启动期间返回列表不会被迟到响应重新拉回且任�
             ],
           },
           "permissionProfile/list": {
-            data: [{ id: ":workspace", allowed: true }],
+            data: [
+              { id: ":workspace", allowed: true },
+              { id: ":danger-full-access", allowed: true },
+            ],
           },
           "config/read": { config: { sandbox_mode: "workspace-write" } },
           "thread/list": {
@@ -1356,7 +1360,9 @@ test("新会话启动期间返回列表不会被迟到响应重新拉回且任�
   });
 
   await page.goto("/");
-  await expect(page.getByRole("button", { name: "已有会话" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "已有会话" }).first(),
+  ).toBeVisible();
   await page.getByRole("button", { name: "聊天", exact: true }).click();
   await page.getByRole("textbox", { name: "向 Codex 提问" }).fill("开始任务");
   await page.getByRole("button", { name: "发送", exact: true }).click();
@@ -1370,6 +1376,14 @@ test("新会话启动期间返回列表不会被迟到响应重新拉回且任�
   await page.waitForTimeout(250);
   await expect(page.getByPlaceholder("搜索聊天")).toBeVisible();
   await expect(delayedThread).toBeVisible();
+
+  await page.getByRole("button", { name: "聊天", exact: true }).click();
+  await page.getByRole("textbox", { name: "向 Codex 提问" }).fill("并行新任务");
+  await expect(page.getByRole("button", { name: "发送", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "停止", exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "选择审批与权限模式" }),
+  ).toContainText("完全访问权限");
 });
 
 test("点击会话立即进入详情，失败后可以在骨架屏中重试", async ({

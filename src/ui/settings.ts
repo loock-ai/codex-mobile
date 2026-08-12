@@ -198,6 +198,18 @@ export function permissionModesFromProfiles(
   return modes;
 }
 
+export function defaultNewChatPermissionMode(
+  profiles: Array<{ id: string; allowed?: boolean }>,
+): PermissionMode | null {
+  const modes = permissionModesFromProfiles(profiles);
+  return (
+    modes.find((mode) => mode.id === "full-access") ??
+    modes.find((mode) => mode.id === "default") ??
+    modes[0] ??
+    null
+  );
+}
+
 export function permissionModeFromSettings(
   permissions: string | null | undefined,
   approvalPolicy: ApprovalPolicy | null | undefined,
