@@ -206,6 +206,23 @@ describe("悬浮状态布局", () => {
     expect(bodyRule).toContain("overflow-y: auto");
   });
 
+  it("视频预览保持原始宽高比且不会裁掉原生控制栏", () => {
+    const stageRule =
+      styles.match(/(?:^|\n)\.video-preview-stage\s*\{([^}]*)\}/)?.[1] ??
+      "";
+    const videoRule =
+      styles.match(
+        /(?:^|\n)\.video-preview-stage video\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+
+    expect(stageRule).toContain("overflow: visible");
+    expect(videoRule).toContain("width: auto");
+    expect(videoRule).toContain("height: auto");
+    expect(videoRule).toContain("max-width: 100%");
+    expect(videoRule).toContain("max-height: min(60dvh, 640px)");
+    expect(videoRule).toContain("border-radius: 20px");
+  });
+
   it("ActionSheet 统一裁剪圆角且只让中间内容滚动", () => {
     const sheetRule =
       styles.match(/(?:^|\n)\.action-sheet\s*\{([^}]*)\}/)?.[1] ?? "";
