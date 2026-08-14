@@ -194,6 +194,8 @@ export function ConversationPage({
   onDraftChange: (value: string) => void;
   onInterrupt: () => void | Promise<void>;
 }) {
+  const selectedBackend =
+    backends.find((backend) => backend.id === backendId) ?? null;
   const [previewImage, setPreviewImage] = useState<DraftImage | null>(null);
   const [statusOpen, setStatusOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -420,6 +422,7 @@ export function ConversationPage({
                 turn={turn}
                 liveDiff={turn.liveDiff}
                 client={client}
+                backend={selectedBackend}
               />
             )) : !isNewChat && (
               <div className="empty-state">{t("开始一次新的 Codex 对话")}</div>

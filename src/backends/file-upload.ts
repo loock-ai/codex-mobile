@@ -4,6 +4,16 @@ import { t } from "../i18n";
 
 type Fetcher = typeof fetch;
 
+export function remoteFilePreviewUrl(
+  backend: BackendConfig,
+  path: string,
+) {
+  const url = new URL("/api/files/preview", `${backend.baseUrl}/`);
+  if (backend.token) url.searchParams.set("token", backend.token);
+  url.searchParams.set("path", path);
+  return url.toString();
+}
+
 export async function uploadFile(
   backend: BackendConfig,
   file: File,

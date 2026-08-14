@@ -1,7 +1,8 @@
 import { createServer, type Server } from "node:http";
-import { mkdir, open, readFile, rm } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { mkdir, open, readFile, rm, stat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { extname, join, normalize } from "node:path";
+import { extname, isAbsolute, join, normalize } from "node:path";
 import WebSocket, { WebSocketServer } from "ws";
 
 export interface GatewayOptions {
@@ -40,6 +41,35 @@ const contentTypes: Record<string, string> = {
   ".svg": "image/svg+xml",
 };
 
+const videoContentTypes: Record<string, string> = {
+  ".m4v": "video/x-m4v",
+  ".mov": "video/quicktime",
+  ".mp4": "video/mp4",
+  ".ogg": "video/ogg",
+  ".ogv": "video/ogg",
+  ".webm": "video/webm",
+};
+
+function byteRange(value: string, size: number) {
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
+  if (!match || (!match[1] && !match[2]) || size <= 0) return null;
+  let start: number;
+  let end: number;
+  if (!match[1]) {
+    const suffix = Number(match[2]);
+    if (!Number.isSafeInteger(suffix) || suffix <= 0) return null;
+    start = Math.max(0, size - suffix);
+    end = size - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] ? Number(match[2]) : size - 1;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return null;
+    end = Math.min(end, size - 1);
+  }
+  if (start < 0 || start >= size || end < start) return null;
+  return { start, end };
+}
+
 function authorized(url: URL, expected?: string, cookie?: string) {
   return (
     !expected ||
@@ -71,6 +101,7 @@ export async function createGateway(options: GatewayOptions): Promise<Gateway> {
       "/api/host",
       "/api/projects",
       "/api/uploads/file",
+      "/api/files/preview",
     ].includes(url.pathname);
     const apiRequest =
       url.pathname === "/api" || url.pathname.startsWith("/api/");
@@ -206,6 +237,46 @@ export async function createGateway(options: GatewayOptions): Promise<Gateway> {
       response.statusCode = 201;
       response.setHeader("content-type", "application/json; charset=utf-8");
       response.end(JSON.stringify({ path: filePath, name, type, size }));
+      return;
+    }
+    if (url.pathname === "/api/files/preview" && request.method === "GET") {
+      const filePath = url.searchParams.get("path") ?? "";
+      const contentType = videoContentTypes[extname(filePath).toLowerCase()];
+      if (!filePath || !isAbsolute(filePath) || !contentType) {
+        response.statusCode = 415;
+        response.end("Unsupported video path");
+        return;
+      }
+      try {
+        const details = await stat(filePath);
+        if (!details.isFile()) throw new Error("NOT_A_FILE");
+        response.setHeader("accept-ranges", "bytes");
+        response.setHeader("content-type", contentType);
+        response.setHeader("cache-control", "private, no-store");
+        const rangeHeader = request.headers.range;
+        if (rangeHeader) {
+          const range = byteRange(rangeHeader, details.size);
+          if (!range) {
+            response.statusCode = 416;
+            response.setHeader("content-range", `bytes */${details.size}`);
+            response.end();
+            return;
+          }
+          response.statusCode = 206;
+          response.setHeader(
+            "content-range",
+            `bytes ${range.start}-${range.end}/${details.size}`,
+          );
+          response.setHeader("content-length", range.end - range.start + 1);
+          createReadStream(filePath, range).pipe(response);
+          return;
+        }
+        response.setHeader("content-length", details.size);
+        createReadStream(filePath).pipe(response);
+      } catch {
+        response.statusCode = 404;
+        response.end("Video not found");
+      }
       return;
     }
     if (apiRequest) {

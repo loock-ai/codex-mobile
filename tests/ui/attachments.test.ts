@@ -196,12 +196,15 @@ describe("图片输入", () => {
       { type: "text", text: "总结这个文件", text_elements: [] },
       {
         type: "text",
-        text: "已上传文件：需求.pdf\n本机路径：/tmp/codex-mobile/需求.pdf",
+        text: "已上传文件：[需求.pdf](/tmp/codex-mobile/%E9%9C%80%E6%B1%82.pdf)\n本机路径：`/tmp/codex-mobile/需求.pdf`",
         text_elements: [],
       },
     ]);
     expect(buildOptimisticUserContent("", [], [file])).toEqual([
-      { type: "text", text: "文件：需求.pdf" },
+      {
+        type: "text",
+        text: "已上传文件：[需求.pdf](/tmp/codex-mobile/%E9%9C%80%E6%B1%82.pdf)\n本机路径：`/tmp/codex-mobile/需求.pdf`",
+      },
     ]);
   });
 });

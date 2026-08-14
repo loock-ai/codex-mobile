@@ -492,6 +492,13 @@ button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; 
 .code-block-copy > button svg { width: 14px; height: 14px; stroke-width: 1.6; }
 .code-block-copy > small { position: absolute; top: 27px; right: 0; border-radius: 8px; background: rgba(255,255,255,.96); padding: 3px 6px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
 .markdown-body img, .markdown-body video { max-width: 100%; height: auto; }
+.message-video { display: block; width: 100%; max-height: 58dvh; margin: 0 0 13px; border-radius: 18px; background: #111; object-fit: contain; }
+.video-preview-backdrop { z-index: 30; background: rgba(0,0,0,.62); }
+.video-preview-sheet { max-height: 92dvh; }
+.video-preview-sheet .action-sheet-body { display: grid; gap: 14px; padding: 0 18px 18px; }
+.video-preview-stage { overflow: hidden; display: grid; min-height: 180px; max-height: 70dvh; border-radius: 20px; background: #080808; place-items: center; }
+.video-preview-stage video { display: block; width: 100%; max-height: 70dvh; background: #080808; object-fit: contain; }
+.video-preview-name { overflow: hidden; padding: 0 4px; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .markdown-body pre code { background: transparent; padding: 0; }
 .markdown-body table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
 .markdown-body th, .markdown-body td { border: 1px solid #ddd; padding: 7px 9px; white-space: nowrap; }

@@ -12,10 +12,19 @@ import {
   RemoteFileLink,
 } from "../../src/features/conversation/sheets/RemoteFileSheets";
 import { ImagePreviewSheet } from "../../src/features/conversation/sheets/ImagePreviewSheet";
+import type { BackendConfig } from "../../src/backends/types";
 
 afterEach(cleanup);
 
 describe("图片放大预览", () => {
+  const backend: BackendConfig = {
+    id: "mini",
+    name: "Mac mini",
+    baseUrl: "http://mini.local:4173",
+    token: "preview-token",
+    enabled: true,
+    order: 0,
+  };
   it("大图支持按钮缩放和一键还原", () => {
     render(
       <ImagePreviewSheet
@@ -117,6 +126,57 @@ describe("图片放大预览", () => {
       path: "/tmp/screenshot.png",
     });
     expect(screen.queryByText(/二进制文件/)).toBeNull();
+  });
+
+  it("远程视频链接打开支持系统控制和流式播放的预览层", () => {
+    render(
+      <RemoteFileLink
+        href="/tmp/project/demo.mp4"
+        client={null}
+        backend={backend}
+      >
+        demo.mp4
+      </RemoteFileLink>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "demo.mp4" }));
+
+    const dialog = screen.getByRole("dialog", { name: "视频预览" });
+    const video = screen.getByLabelText("播放视频 demo.mp4");
+    expect(dialog).not.toBeNull();
+    expect(video.tagName).toBe("VIDEO");
+    expect(video.hasAttribute("controls")).toBe(true);
+    expect(video.hasAttribute("playsinline")).toBe(true);
+    expect(video.getAttribute("src")).toBe(
+      "http://mini.local:4173/api/files/preview?token=preview-token&path=%2Ftmp%2Fproject%2Fdemo.mp4",
+    );
+  });
+
+  it("Codex 生成的视频直接在消息中提供预览播放", () => {
+    render(
+      <TurnCard
+        client={null}
+        backend={backend}
+        turn={{
+          id: "turn-video",
+          status: "completed",
+          items: [
+            {
+              id: "generated-video",
+              type: "videoGeneration",
+              savedPath: "/tmp/project/codex-result.mp4",
+            },
+          ],
+        }}
+      />,
+    );
+
+    const video = screen.getByLabelText("播放视频 codex-result.mp4");
+    expect(video.tagName).toBe("VIDEO");
+    expect(video.hasAttribute("controls")).toBe(true);
+    expect(video.getAttribute("src")).toContain(
+      "path=%2Ftmp%2Fproject%2Fcodex-result.mp4",
+    );
   });
 
   it("远程 Markdown 文件默认预览并允许切换源码", async () => {

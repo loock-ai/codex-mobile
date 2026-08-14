@@ -15,6 +15,9 @@ import { ActionSheet } from "../../../ui/ActionSheet";
 import { t } from "../../../i18n";
 import { ActionSheetDownload } from "../../../ui/ActionSheetDownload";
 import { ImagePreviewSheet } from "./ImagePreviewSheet";
+import { VideoPreviewSheet } from "./VideoPreviewSheet";
+import type { BackendConfig } from "../../../backends/types";
+import { remoteFilePreviewUrl } from "../../../backends/file-upload";
 
 function imageMime(source: string) {
   const extension = source.split(/[?#]/)[0]?.split(".").at(-1)?.toLowerCase();
@@ -33,6 +36,34 @@ function imageMime(source: string) {
 
 function isPreviewableImagePath(source: string) {
   return /\.(?:avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/i.test(source);
+}
+
+export function isPreviewableVideoPath(source: string) {
+  return /\.(?:m4v|mov|mp4|ogg|ogv|webm)(?:$|[?#])/i.test(source);
+}
+
+export function RemoteVideo({
+  path,
+  backend,
+  className = "",
+}: {
+  path: string;
+  backend: BackendConfig;
+  className?: string;
+}) {
+  const name = path.split("/").filter(Boolean).at(-1) || t("视频预览");
+  return (
+    <video
+      className={`message-video ${className}`.trim()}
+      src={remoteFilePreviewUrl(backend, path)}
+      controls
+      playsInline
+      preload="metadata"
+      aria-label={t("播放视频 {name}", { name })}
+    >
+      {t("浏览器无法播放此视频格式")}
+    </video>
+  );
 }
 
 function isMarkdownPath(source: string) {
@@ -422,10 +453,12 @@ export function RemoteFileLink({
   href,
   children,
   client,
+  backend,
 }: {
   href: string;
   children: ReactNode;
   client: AppServerClient | null;
+  backend?: BackendConfig | null;
 }) {
   const target = parseRemoteFileHref(href);
   const [open, setOpen] = useState(false);
@@ -444,13 +477,24 @@ export function RemoteFileLink({
       </a>
       {open &&
         createPortal(
-          <RemoteTextFileSheet
-            href={href}
-            path={target.path}
-            line={target.line}
-            client={client}
-            onClose={() => setOpen(false)}
-          />,
+          isPreviewableVideoPath(target.path) && backend ? (
+            <VideoPreviewSheet
+              src={remoteFilePreviewUrl(backend, target.path)}
+              name={
+                target.path.split("/").filter(Boolean).at(-1) || t("视频预览")
+              }
+              details={target.path}
+              onClose={() => setOpen(false)}
+            />
+          ) : (
+            <RemoteTextFileSheet
+              href={href}
+              path={target.path}
+              line={target.line}
+              client={client}
+              onClose={() => setOpen(false)}
+            />
+          ),
           document.body,
         )}
     </>

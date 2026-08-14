@@ -268,6 +268,37 @@ describe("透明网关", () => {
     expect(await readFile(result.path, "utf8")).toBe("pdf");
   });
 
+  it("鉴权后支持按 Range 流式读取视频文件", async () => {
+    const mediaDir = await mkdtemp(join(tmpdir(), "codex-mobile-video-"));
+    const videoPath = join(mediaDir, "演示.mp4");
+    await writeFile(videoPath, "0123456789");
+    cleanups.push(() => rm(mediaDir, { recursive: true, force: true }));
+    const gateway = await createGateway({
+      host: "127.0.0.1",
+      port: 0,
+      mode: "external",
+      upstreamUrl: "ws://127.0.0.1:9",
+      staticDir: null,
+      accessToken: "video-token",
+    });
+    cleanups.push(async () => gateway.close());
+
+    const denied = await fetch(
+      `http://127.0.0.1:${gateway.port}/api/files/preview?path=${encodeURIComponent(videoPath)}`,
+    );
+    const partial = await fetch(
+      `http://127.0.0.1:${gateway.port}/api/files/preview?token=video-token&path=${encodeURIComponent(videoPath)}`,
+      { headers: { Range: "bytes=2-5" } },
+    );
+
+    expect(denied.status).toBe(401);
+    expect(partial.status).toBe(206);
+    expect(partial.headers.get("accept-ranges")).toBe("bytes");
+    expect(partial.headers.get("content-range")).toBe("bytes 2-5/10");
+    expect(partial.headers.get("content-type")).toBe("video/mp4");
+    expect(await partial.text()).toBe("2345");
+  });
+
   it("控制接口支持预检并允许任意跨源请求", async () => {
     const gateway = await createGateway({
       host: "127.0.0.1",

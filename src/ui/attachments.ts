@@ -192,7 +192,12 @@ export function mergeDraftImages(
 }
 
 function uploadedFileInput(file: UploadedFile) {
-  return `${t("已上传文件：{name}", { name: file.name })}\n${t("本机路径：{path}", { path: file.path })}`;
+  const label = file.name.replace(/([\\[\]])/g, "\\$1");
+  const href = encodeURI(file.path)
+    .replace(/\(/g, "%28")
+    .replace(/\)/g, "%29");
+  const path = file.path.replace(/`/g, "\\`");
+  return `${t("已上传文件：{name}", { name: `[${label}](${href})` })}\n${t("本机路径：{path}", { path: `\`${path}\`` })}`;
 }
 
 export function buildTurnInput(
@@ -229,7 +234,7 @@ export function buildOptimisticUserContent(
     })),
     ...files.map((file) => ({
       type: "text" as const,
-      text: t("文件：{name}", { name: file.name }),
+      text: uploadedFileInput(file),
     })),
   ];
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { AppServerClient } from "../../app-server/client";
+import type { BackendConfig } from "../../backends/types";
 import {
   automationAgentMessageText,
   groupTimelineEntries,
@@ -21,6 +22,8 @@ import { Chevron } from "../../ui/icons";
 import {
   RemoteFileLink,
   RemoteImage,
+  RemoteVideo,
+  isPreviewableVideoPath,
 } from "./sheets/RemoteFileSheets";
 import { t, getActiveLocale } from "../../i18n";
 import {
@@ -41,6 +44,15 @@ function itemText(item: AnyRecord) {
   if (Array.isArray(item.command)) return item.command.join(" ");
   if (typeof item.output === "string") return item.output;
   return "";
+}
+
+function videoPathForItem(item: AnyRecord) {
+  const candidate = item.savedPath ?? item.path ?? item.result;
+  return typeof candidate === "string" &&
+    candidate.startsWith("/") &&
+    isPreviewableVideoPath(candidate)
+    ? candidate
+    : "";
 }
 
 function ImageGallery({
@@ -67,9 +79,11 @@ function ImageGallery({
 function UserBubble({
   item,
   client,
+  backend,
 }: {
   item: AnyRecord;
   client: AppServerClient | null;
+  backend?: BackendConfig | null;
 }) {
   const rawText = itemText(item);
   const heartbeat = parseAutomationHeartbeat(rawText);
@@ -98,7 +112,7 @@ function UserBubble({
               />
             )}
             renderLink={(href, children) => (
-              <RemoteFileLink href={href} client={client}>
+              <RemoteFileLink href={href} client={client} backend={backend}>
                 {children}
               </RemoteFileLink>
             )}
@@ -193,9 +207,11 @@ function ToolActivity({ items }: { items: AnyRecord[] }) {
 function TimelineItem({
   item,
   client,
+  backend,
 }: {
   item: AnyRecord;
   client: AppServerClient | null;
+  backend?: BackendConfig | null;
 }) {
   const type = String(item.type ?? "");
   if (type === "contextCompaction") {
@@ -215,10 +231,16 @@ function TimelineItem({
     ? automationAgentMessageText(rawText)
     : rawText;
   if (!text && !type) return null;
-  if (type === "userMessage") return <UserBubble item={item} client={client} />;
+  if (type === "userMessage") {
+    return <UserBubble item={item} client={client} backend={backend} />;
+  }
   const displayText = type === "agentMessage"
     ? visibleAgentMessageText(item)
     : text;
+  const generatedVideoPath = videoPathForItem(item);
+  if (backend && generatedVideoPath) {
+    return <RemoteVideo path={generatedVideoPath} backend={backend} />;
+  }
   const images = imageSourcesForItem(item);
   if (images.length) return <ImageGallery images={images} client={client} />;
   if (/reasoning/i.test(type)) {
@@ -240,7 +262,7 @@ function TimelineItem({
           />
         )}
         renderLink={(href, children) => (
-          <RemoteFileLink href={href} client={client}>
+          <RemoteFileLink href={href} client={client} backend={backend}>
             {children}
           </RemoteFileLink>
         )}
@@ -369,10 +391,12 @@ export function receivedItemCharacterCount(item: AnyRecord) {
 export function TurnCard({
   turn,
   client,
+  backend,
 }: {
   turn: AnyRecord;
   liveDiff?: string;
   client: AppServerClient | null;
+  backend?: BackendConfig | null;
 }) {
   const grouped = groupTurnItems(turn);
   const responsesRef = useRef<HTMLDivElement>(null);
@@ -401,6 +425,7 @@ export function TurnCard({
           key={entry.item.id ?? index}
           item={entry.item}
           client={client}
+          backend={backend}
         />
       ),
     );
@@ -436,7 +461,7 @@ export function TurnCard({
     <section className="turn-card">
       {grouped.user && (
         <div className="turn-user">
-          <UserBubble item={grouped.user} client={client} />
+          <UserBubble item={grouped.user} client={client} backend={backend} />
         </div>
       )}
       <div className="turn-responses" ref={responsesRef}>
@@ -454,6 +479,7 @@ export function TurnCard({
               key={items[0]?.id ?? index}
               items={items}
               client={client}
+              backend={backend}
               copyTarget={responsesRef}
               showCopy={index === copySegmentIndex}
               durationLabel={
@@ -470,12 +496,14 @@ export function TurnCard({
 function CompletedResponseSegment({
   items,
   client,
+  backend,
   copyTarget,
   showCopy,
   durationLabel,
 }: {
   items: AnyRecord[];
   client: AppServerClient | null;
+  backend?: BackendConfig | null;
   copyTarget: RefObject<HTMLDivElement | null>;
   showCopy: boolean;
   durationLabel: string | null;
@@ -500,6 +528,7 @@ function CompletedResponseSegment({
           key={entry.item.id ?? index}
           item={entry.item}
           client={client}
+          backend={backend}
         />
       ),
     );
@@ -508,6 +537,7 @@ function CompletedResponseSegment({
       entries.filter(
         (item) =>
           item.type === "userMessage" ||
+          Boolean(videoPathForItem(item)) ||
           (
             completed.previousCount === 0 &&
             item.type === "contextCompaction"
@@ -544,7 +574,11 @@ function CompletedResponseSegment({
       {!showPrevious && renderUnfoldedEntries(processBeforeFinal)}
       {completed.final && (
         <>
-          <TimelineItem item={completed.final} client={client} />
+          <TimelineItem
+            item={completed.final}
+            client={client}
+            backend={backend}
+          />
           {showCopy && (
             <CopyButton
               text={() => visibleAssistantText(copyTarget.current)}
