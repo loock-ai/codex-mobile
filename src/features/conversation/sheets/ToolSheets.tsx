@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import {
   parseUnifiedDiff,
   summarizeFileChange,
@@ -31,7 +32,7 @@ export function ToolDetailSheet({
     item.error ??
     item.contentItems ??
     (isFile ? item.changes : null);
-  return (
+  return createPortal(
     <ActionSheet
       title={title}
       onClose={onClose}
@@ -80,7 +81,8 @@ export function ToolDetailSheet({
             <pre>{typeof output === "string" ? output : JSON.stringify(output, null, 2)}</pre>
           </>
         )}
-    </ActionSheet>
+    </ActionSheet>,
+    document.body,
   );
 }
 

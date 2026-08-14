@@ -1,4 +1,4 @@
-import { fireEvent, render, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
   FileDiffSheet,
@@ -14,11 +14,15 @@ describe("工具 ActionSheet", () => {
         onClose={onClose}
       />,
     );
-    const commandView = within(command.container);
-    const commandClose = commandView.getByRole("button", {
+    const commandClose = screen.getByRole("button", {
       name: "关闭工具详情",
     });
     expect(commandClose.textContent).toBe("×");
+    expect(
+      screen
+        .getByRole("dialog", { name: "命令执行" })
+        .closest(".action-sheet-backdrop")?.parentElement,
+    ).toBe(document.body);
     command.unmount();
 
     const diff = render(
