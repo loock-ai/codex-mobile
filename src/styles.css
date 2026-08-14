@@ -266,7 +266,7 @@ button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; 
 .image-placeholder { animation: image-loading 1.4s ease-in-out infinite; }
 @keyframes image-loading { 50% { opacity: .55; } }
 .action-sheet-backdrop { position: fixed; inset: 0; z-index: 14; display: flex; align-items: flex-end; justify-content: center; background: rgba(0,0,0,.24); }
-.action-sheet { width: min(100%, 720px); max-height: 84dvh; overflow: hidden; isolation: isolate; border-radius: 30px 30px 0 0; background: #fff; color: #111; display: flex; flex-direction: column; text-align: left; }
+.action-sheet { width: min(100%, 720px); max-height: 84dvh; overflow: hidden; isolation: isolate; border-radius: 30px 30px 0 0; clip-path: inset(0 round 30px 30px 0 0); background: #fff; color: #111; display: flex; flex-direction: column; text-align: left; }
 .action-sheet-soft { background: #f7f7f7; }
 .action-sheet-handle { flex: 0 0 auto; display: block; width: 64px; height: 5px; margin: 10px auto 0; border-radius: 4px; background: #d5d5d5; }
 .action-sheet-header { position: sticky; top: 0; z-index: 2; flex: 0 0 auto; min-height: 64px; padding: 10px 20px 8px; background: inherit; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 16px; }

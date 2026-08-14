@@ -240,6 +240,7 @@ describe("悬浮状态布局", () => {
     expect(sheetRule).toContain("overflow: hidden");
     expect(sheetRule).toContain("isolation: isolate");
     expect(sheetRule).toContain("border-radius: 30px 30px 0 0");
+    expect(sheetRule).toContain("clip-path: inset(0 round 30px 30px 0 0)");
     expect(sheetRule).toContain("display: flex");
     expect(headerRule).toContain("flex: 0 0 auto");
     expect(bodyRule).toContain("min-height: 0");
