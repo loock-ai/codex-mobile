@@ -28,6 +28,7 @@ import { ImagePreviewSheet } from "./sheets/ImagePreviewSheet";
 import { useConversationAutoScroll } from "./conversation-scroll";
 import { useRealtimeConversation } from "./useRealtimeConversation";
 import { t } from "../../i18n";
+import videoPoster from "../../assets/video-poster.svg";
 
 export type ConversationLoadState = "idle" | "loading" | "ready" | "error";
 
@@ -493,6 +494,7 @@ export function ConversationPage({
                     aria-label={t("待发送 {name}", { name: file.name })}
                     controls
                     preload="metadata"
+                    poster={videoPoster}
                   />
                 ) : file.type.startsWith("audio/") ? (
                   <div className="draft-file-audio">

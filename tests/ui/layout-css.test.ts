@@ -214,13 +214,14 @@ describe("悬浮状态布局", () => {
       styles.match(
         /(?:^|\n)\.video-preview-stage video\s*\{([^}]*)\}/,
       )?.[1] ?? "";
-
     expect(stageRule).toContain("overflow: visible");
+    expect(stageRule).not.toContain("padding-bottom:");
     expect(videoRule).toContain("width: auto");
     expect(videoRule).toContain("height: auto");
     expect(videoRule).toContain("max-width: 100%");
     expect(videoRule).toContain("max-height: min(60dvh, 640px)");
-    expect(videoRule).toContain("border-radius: 20px");
+    expect(videoRule).not.toContain("border-radius:");
+    expect(styles).not.toContain("video-preview-media-ready");
   });
 
   it("ActionSheet 统一裁剪圆角且只让中间内容滚动", () => {

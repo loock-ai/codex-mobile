@@ -18,6 +18,7 @@ import { ImagePreviewSheet } from "./ImagePreviewSheet";
 import { VideoPreviewSheet } from "./VideoPreviewSheet";
 import type { BackendConfig } from "../../../backends/types";
 import { remoteFilePreviewUrl } from "../../../backends/file-upload";
+import videoPoster from "../../../assets/video-poster.svg";
 
 function imageMime(source: string) {
   const extension = source.split(/[?#]/)[0]?.split(".").at(-1)?.toLowerCase();
@@ -59,6 +60,7 @@ export function RemoteVideo({
       controls
       playsInline
       preload="metadata"
+      poster={videoPoster}
       aria-label={t("播放视频 {name}", { name })}
     >
       {t("浏览器无法播放此视频格式")}

@@ -270,6 +270,7 @@ const english: Record<string, string> = {
   "下载文件": "Download file",
   "视频预览": "Video preview",
   "关闭视频预览": "Close video preview",
+  "下载视频": "Download video",
   "播放视频 {name}": "Play video {name}",
   "浏览器无法播放此视频格式": "This video format is not supported by the browser",
   "Markdown 显示模式": "Markdown display mode",

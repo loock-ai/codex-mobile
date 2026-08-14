@@ -497,7 +497,7 @@ button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; 
 .video-preview-sheet { max-height: 92dvh; }
 .video-preview-sheet .action-sheet-body { display: grid; gap: 14px; padding: 0 18px 18px; }
 .video-preview-stage { overflow: visible; display: grid; min-height: 180px; border-radius: 20px; background: #080808; place-items: center; }
-.video-preview-stage video { display: block; width: auto; height: auto; max-width: 100%; max-height: min(60dvh, 640px); border-radius: 20px; background: #080808; object-fit: contain; }
+.video-preview-stage video { display: block; width: auto; height: auto; max-width: 100%; max-height: min(60dvh, 640px); background: #080808; object-fit: contain; }
 .video-preview-name { overflow: hidden; padding: 0 4px; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .markdown-body pre code { background: transparent; padding: 0; }
 .markdown-body table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }

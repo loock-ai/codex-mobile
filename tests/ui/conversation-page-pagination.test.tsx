@@ -288,7 +288,9 @@ describe("会话详情历史分页", () => {
     );
     const view = within(container);
 
-    expect(view.getByLabelText("待发送 演示.mp4").tagName).toBe("VIDEO");
+    const video = view.getByLabelText("待发送 演示.mp4");
+    expect(video.tagName).toBe("VIDEO");
+    expect(video.getAttribute("poster")).toMatch(/^data:image\/svg\+xml/);
     expect(view.getByText("PDF")).not.toBeNull();
     expect(view.getByRole("button", { name: "移除 需求.pdf" })).not.toBeNull();
   });

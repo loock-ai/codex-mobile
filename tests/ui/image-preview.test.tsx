@@ -143,13 +143,28 @@ describe("图片放大预览", () => {
 
     const dialog = screen.getByRole("dialog", { name: "视频预览" });
     const video = screen.getByLabelText("播放视频 demo.mp4");
+    const download = screen.getByRole("link", { name: "下载视频" });
     expect(dialog).not.toBeNull();
     expect(video.tagName).toBe("VIDEO");
     expect(video.hasAttribute("controls")).toBe(true);
     expect(video.hasAttribute("playsinline")).toBe(true);
+    expect(video.getAttribute("poster")).toMatch(/^data:image\/svg\+xml/);
     expect(video.getAttribute("src")).toBe(
       "http://mini.local:4173/api/files/preview?token=preview-token&path=%2Ftmp%2Fproject%2Fdemo.mp4",
     );
+    expect(download.getAttribute("href")).toBe(video.getAttribute("src"));
+    expect(download.getAttribute("download")).toBe("demo.mp4");
+
+    Object.defineProperties(video, {
+      videoWidth: { configurable: true, value: 1080 },
+      videoHeight: { configurable: true, value: 1920 },
+    });
+    fireEvent.loadedMetadata(video);
+
+    expect(video.getAttribute("poster")).toBeNull();
+    expect(video.getAttribute("width")).toBe("1080");
+    expect(video.getAttribute("height")).toBe("1920");
+    expect(video.style.aspectRatio).toBe("1080 / 1920");
   });
 
   it("Codex 生成的视频直接在消息中提供预览播放", () => {
@@ -174,6 +189,7 @@ describe("图片放大预览", () => {
     const video = screen.getByLabelText("播放视频 codex-result.mp4");
     expect(video.tagName).toBe("VIDEO");
     expect(video.hasAttribute("controls")).toBe(true);
+    expect(video.getAttribute("poster")).toMatch(/^data:image\/svg\+xml/);
     expect(video.getAttribute("src")).toContain(
       "path=%2Ftmp%2Fproject%2Fcodex-result.mp4",
     );
