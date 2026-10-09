@@ -1,369 +1,198 @@
-# Codex Mobile
+# Codex Mobile Launcher
 
-[![Build Mobile Apps](https://github.com/loock-ai/codex-mobile/actions/workflows/build-android.yml/badge.svg)](https://github.com/loock-ai/codex-mobile/actions/workflows/build-android.yml)
-[![npm](https://img.shields.io/npm/v/codex-mobile)](https://www.npmjs.com/package/codex-mobile)
-[![GitHub Release](https://img.shields.io/github/v/release/loock-ai/codex-mobile)](https://github.com/loock-ai/codex-mobile/releases/latest)
 [![Apache-2.0](https://img.shields.io/github/license/loock-ai/codex-mobile)](LICENSE)
-![平台](https://img.shields.io/badge/platform-Web%20%7C%20Android%20%7C%20iOS-111111)
+![平台](https://img.shields.io/badge/platform-macOS%20%7C%20Web-111111)
+[![GitHub Release](https://img.shields.io/github/v/release/loock-ai/codex-mobile)](https://github.com/loock-ai/codex-mobile/releases/latest)
 
-**在手机上查看、继续和管理运行在 Mac 上的真实 Codex 工作流。**
+**在 Mac 上启动连接，在手机上继续桌面的 Codex 任务。**
 
-Codex Mobile 是一个移动优先的 Codex Remote 客户端，提供两种连接方式：桌面 CDP
-模式通过 ChatGPT Desktop 的既有连接控制会话，方便手机与桌面查看同一任务；原
-`app-server` 模式保留独立服务的使用方式。客户端支持多设备、远程主机选择，以及
-独立的 Dots 对话入口。
+Codex Mobile Launcher 是一个 macOS 菜单栏启动器。它负责启动和配置桌面连接，
+提供手机可访问的 Web 页面，让你查看项目和会话、收发消息、处理审批，
+也能在任务运行时补充引导，或者进入独立的 Dots 对话。
 
-[快速开始](#快速开始) · [核心能力](#核心能力) · [系统架构](#系统架构) ·
-[移动端构建](#移动端构建) · [已知边界](#已知边界)
+默认使用 **CDP 桌面桥接**：手机请求通过 ChatGPT Desktop 的既有服务执行，
+使用桌面的会话和主机连接。启动器同时保留原 Codex Mobile 的托管和外部
+app-server 模式。
 
-> Codex Mobile 是独立开源项目，与 OpenAI 官方没有隶属关系。
+[快速开始](#快速开始) · [日常操作](#日常操作) · [手机上可以做什么](#手机上可以做什么) ·
+[连接设置](#连接设置) · [工作原理](#工作原理)
 
-## 界面预览
-
-| 会话列表 | 对话详情 | 设备设置 |
-| --- | --- | --- |
-| ![会话列表](docs/assets/mobile-reference/remote-thread-list.jpg) | ![对话详情](docs/assets/mobile-reference/conversation-detail.jpg) | ![设备设置](docs/assets/mobile-reference/e2e-mobile-settings-final.png) |
+> 本项目独立开发，与 OpenAI 官方没有隶属关系。
 
 ## 快速开始
 
-### 桌面连接：macOS 菜单栏启动器
+### 1. 构建启动器
 
-从源码构建启动器（需要 Node.js 20+，本机已安装 ChatGPT Desktop）：
+需要 macOS、Node.js 20+，以及已安装并登录的 ChatGPT Desktop。
+当前应用包以 Apple Silicon 为主，尚未签名，需从源码构建。
 
 ```bash
 git clone https://github.com/loock-ai/codex-mobile.git
 cd codex-mobile
 npm install
+npm run package:launcher
+```
+
+打开生成的应用：
+
+```bash
+open "launcher-release/mac-arm64/Codex Mobile Launcher.app"
+```
+
+只运行源码版面板，也可使用：
+
+```bash
 npm run build:launcher
 npm run launcher
 ```
 
-点击菜单栏 `⌘`，在设置中选择 **CDP 桌面桥接**，然后点击 **启动并打开 Web**。
-默认网关端口为 `19877`，CDP 端口为 `9333`。手机与电脑连接同一网络后，点击
-**展开二维码**扫码；二维码默认收起，也可复制完整连接链接。
+### 2. 连接桌面
 
-ChatGPT 已运行但尚未开放 CDP 时，点击 **强制重启**，启动器会直接终止配置安装包的
-ChatGPT 主进程，以本机 CDP 参数重新启动并连接，不弹确认框。
+点击 Mac 菜单栏的 `⌘` 图标打开启动器。
 
-也可通过命令启动连接并打开 Web：
+1. 在 **设置** 中选择 **CDP 桌面桥接**，核对 ChatGPT 应用路径并保存。
+2. 点击 **启动并打开 Web**，启动器会建立连接并打开网页。
+3. 如果 ChatGPT 已运行但没有开启 CDP，点击 **强制重启**，重新启动桌面并连接。
+
+**强制重启**直接终止所配置 ChatGPT 安装包的主进程，随后以 CDP 参数启动。
+该操作不弹确认框，运行中的任务、草稿和审批也不会阻拦重启。
+
+### 3. 在手机上打开
+
+手机与 Mac 连接同一网络，在启动器中点击 **展开二维码**后扫码，
+或点击 **复制连接链接**，把完整链接发送到手机浏览器。
+
+二维码默认收起，可再次点击收起。完整链接包含访问口令，请使用复制功能，
+不要只输入界面中显示的地址。
+
+手机打开后，选择项目和会话即可继续操作。启动器默认使用：
+
+| 项目 | 默认值 |
+| --- | --- |
+| 手机 Web 网关 | `19877` |
+| 本机桌面 CDP | `9333` |
+| 手机访问范围 | 局域网 |
+| ChatGPT 应用 | `/Applications/ChatGPT.app` |
+
+## 日常操作
+
+| 按钮或页面 | 用途 |
+| --- | --- |
+| 启动并打开 Web | 建立连接后打开网页 |
+| 打开 Web | 已启动时直接打开连接页面 |
+| 展开／收起二维码 | 按需显示手机扫码入口 |
+| 复制连接链接 | 复制包含访问口令的完整链接 |
+| 停止连接 | 关闭启动器自己的网关，保留 ChatGPT 桌面应用 |
+| 强制重启 | 直接强制重启 ChatGPT、开启 CDP 并重新连接 |
+| 打开 ChatGPT | 打开配置的桌面应用 |
+| 设置 | 修改连接模式、端口、访问范围和口令；修改前需停止连接 |
+| 审批 | 查看等待处理的请求，并进入 Web 回答 |
+| 日志 | 查看启动和连接失败原因，日志隐藏访问口令 |
+
+关闭启动器面板后，连接会继续运行。退出启动器会停止它管理的连接服务。
+
+### 通过命令打开 Web
+
+在源码目录完成构建后：
 
 ```bash
 node bin/codex-mobile.mjs launcher --open-web
 ```
 
-构建 macOS 应用包：
+使用打包应用：
 
 ```bash
-npm run package:launcher
-open "launcher-release/mac-arm64/Codex Mobile Launcher.app"
+open -n "launcher-release/mac-arm64/Codex Mobile Launcher.app" --args --open-web
 ```
 
-当前启动器应用包未签名。配置保存在本机，原模式使用所选 Desktop 安装包内的 CLI，
-不依赖全局 `codex` 路径。更多说明见 [桌面启动器](docs/desktop-launcher.md)。
+命令使用已保存的配置，连接成功后打开 Web。启动器已有实例时会转交命令，
+不会重复创建网关。
 
-### 原 app-server 模式
+## 手机上可以做什么
 
-以下 npm CLI 步骤运行独立 app-server；要控制桌面正在运行的会话，使用上面的 CDP 模式。
-
-#### 1. 安装网关
-
-要求 Node.js 20 或更高版本，并确保本机已有可用的 `codex` CLI。
-
-```bash
-npm install -g codex-mobile
-```
-
-只在当前电脑访问：
-
-```bash
-codex-mobile start
-```
-
-默认打开 [http://127.0.0.1:18766](http://127.0.0.1:18766)。
-
-#### 2. 允许手机通过局域网连接
-
-非回环监听必须配置访问口令：
-
-```bash
-HOST=0.0.0.0 \
-CODEX_MOBILE_TOKEN='<随机口令>' \
-codex-mobile start
-```
-
-在另一个终端显示连接地址和二维码：
-
-```bash
-codex-mobile auth
-```
-
-手机扫码后即可打开：
-
-```text
-http://<电脑局域网IP>:18766/?token=<随机口令>
-```
-
-纯文本脚本可使用 `codex-mobile auth --plain`。最近一次成功启动的实际端口和访问口令
-保存在 `~/.codex-mobile/runtime.json`，文件权限为 `0600`。
-
-#### 3. 添加更多设备
-
-在另一台 Mac 上用不同口令启动网关，然后在 Codex Mobile 的设备管理中输入其完整
-地址。客户端会检查 `/api/host`，完成一次 WebSocket `initialize`，验证成功后保存
-设备。
-
-一个客户端最多保存 8 台设备，并可同时维持所有已启用设备的连接。
-
-## 为什么做这个项目
-
-Codex Desktop 很适合坐在电脑前完成开发任务，但长任务启动后，用户仍可能需要在
-手机上：
-
-- 查看进行状态和最终结果；
-- 处理命令、文件修改和补充信息审批；
-- 继续已有会话或快速发起新任务；
-- 在 MacBook、Mac mini 等多台开发机器之间切换。
-
-本项目不是把终端页面缩小后塞进 WebView，也不维护一套模拟 Codex 的聊天协议。
-前端针对手机重新设计，Codex 业务数据来自真实的桌面连接或独立 `app-server`；Dots 通过桌面现有 HTTP 服务接入。
-
-## 核心能力
-
-| 能力 | 说明 |
+| 功能 | 说明 |
 | --- | --- |
-| 多设备 | 添加、测试、启停和切换多个网关；汇总各机器的连接与待审批状态 |
-| 会话组织 | 全部机器时间流、单机项目分组、搜索、折叠、置顶、未读、重命名和归档 |
-| 长会话 | 即时进入详情、骨架屏、错误重试、turns 分页和滚动位置保持 |
-| 实时交互 | 流式消息、reasoning、工具调用、文件变更、停止运行中的 turn |
-| 模型与权限 | 从 app-server 读取模型、推理强度、服务档位、权限和审批策略 |
-| 审批与提问 | 支持命令、文件修改、附加权限和用户问题；CDP 非阻塞问题显示可收起卡片，任务继续运行 |
-| 运行中引导 | CDP 和原 app-server 模式可向当前 turn 发送补充引导，支持附件 |
-| 桌面远程主机 | 连接测试后选择需要展示的主机；设备管理以连接、主机两级展示 |
-| Dots | 独立消息入口，支持历史、文字、图片和文件发送；每条最多 4 个附件，单个最多 20 MiB |
-| 文件与媒体 | Markdown/GFM、图片输入、远程图片、远程文本、Markdown/HTML 预览和文件 Diff |
-| 前后台恢复 | App 回到前台、网络切换或 WebSocket 半开时主动探测并恢复连接 |
-| 多端复用 | 同一套前端运行于 Web、Android 和 iOS，不在 App 中固化后端地址 |
+| 项目与会话 | 获取所选主机的项目、会话列表和历史记录，长会话分页加载 |
+| 收发消息 | 向桌面会话发送消息，查看回复、推理摘要和工具执行情况 |
+| 运行中引导 | 任务运行时补充要求，继续当前任务，也可携带附件 |
+| 审批与问题 | 处理命令、文件修改、权限请求和用户问题 |
+| 非阻塞提问 | 问题卡片可收起、稍后回答，任务继续执行 |
+| 模型与权限 | 查看并选择桌面提供的模型、思考强度和权限配置 |
+| 图片与文件 | 上传附件、查看消息内容及可用的远程文件 |
+| 远程主机 | 连接测试后选择需要展示的主机，在设备管理中分别开启或隐藏 |
+| 多设备 | 保存多个 Mac 的网关连接，切换或汇总查看会话 |
+| Dots | 独立入口，支持消息历史、文字、图片和文件发送 |
 
-### 移动端交互
+Dots 输入框和消息列表复用普通对话样式，隐藏滚动条但保留滚动。
+每条消息最多 4 个附件，单个不超过 20 MiB，也可以只发送附件。
+上传失败保留草稿；消息投递结果未知时保留核对记录，不自动重发。
 
-- 会话列表以侧边栏组织，标题与机器切换栏联合吸顶。
-- “全部”视图按时间汇总多台机器；单机视图按本机项目目录分组。
-- 项目目录先展示，会话并发加载、独立渲染和独立重试。
-- 首屏只加载最近 10 个 turns，滚动到顶部继续加载旧历史。
-- 工具、审批、文件、Diff 和状态信息使用适合触控的底部 Sheet 展示。
-- 运行状态只显示在具体会话上，不把机器连接状态与任务运行状态混在一起。
+| 会话列表 | 对话详情 | 设备设置 |
+| --- | --- | --- |
+| ![会话列表](docs/assets/mobile-reference/remote-thread-list.jpg) | ![对话详情](docs/assets/mobile-reference/conversation-detail.jpg) | ![设备设置](docs/assets/mobile-reference/e2e-mobile-settings-final.png) |
 
-## 系统架构
+## 连接设置
+
+启动器提供三种模式：
+
+| 模式 | 适用场景 |
+| --- | --- |
+| CDP 桌面桥接（默认） | 通过 ChatGPT Desktop 的既有连接控制桌面会话 |
+| 原 app-server · 启动本机服务 | 由启动器启动并管理独立 app-server |
+| 原 app-server · 连接已有服务 | 接入已运行的本机 app-server |
+
+原 app-server 模式使用所选 Desktop 安装包内的 CLI，自动根据安装包布局查找，
+不依赖全局 `codex` 路径。独立 app-server 进程不保证与桌面的运行状态同步。
+
+配置保存在启动器的本机用户数据目录，配置文件权限为 `0600`。
+默认不会设置开机启动；CDP 只监听本机，手机通过带访问口令的网关连接。
+
+详细说明见 [桌面启动器指南](docs/desktop-launcher.md)。原 npm CLI、环境变量和
+Android／iOS 构建说明见 [原 app-server 与移动端构建指南](docs/app-server-guide.md)。
+
+## 工作原理
 
 ```mermaid
 flowchart LR
-    C["手机浏览器 / Android / iOS"] -->|HTTP API + WebSocket| G["Mac 网关"]
-    G -->|CDP| D["ChatGPT Desktop renderer"]
-    D --> B["既有 Electron / AppHost 服务"]
-    B --> A["Codex 主机连接：本机或远程"]
-    B --> T["Dots 房间 HTTP 接口"]
-    G -->|原模式：V2 JSON-RPC| S["独立 Codex app-server"]
+    L["macOS 菜单栏启动器"] --> G["本机鉴权网关"]
+    P["手机 Web"] -->|HTTP / WebSocket| G
+    G -->|本机 CDP| D["ChatGPT Desktop"]
+    D --> C["既有 Codex 主机连接"]
+    D --> T["既有 Dots HTTP 服务"]
 ```
 
-网关提供静态前端、口令鉴权、项目与设备接口。CDP 模式通过桌面已有 host/app-server
-连接执行程序请求，不另启一套 Codex 会话进程；原 Managed 模式管理独立 app-server，
-External 模式连接已有服务。网关不建立第二套持久化会话数据库。
+启动器负责配置、进程和连接生命周期。网关通过 CDP 调用桌面已有的
+Electron／AppHost 服务，把手机请求发送到所选本机或远程主机。
+CDP 模式不另起一套 Codex 会话进程，也不建立第二套持久化会话数据库。
 
-Dots 使用独立适配与 `/api/dots/*` 路由，复用桌面账户鉴权。接收采用前台轮询；附件先
-上传到目标房间，再随消息提交文件 ID。上传失败保留草稿，消息投递未知时要求核对，
-不会自动重发。详见 [Dots 适配](docs/dots-adapter.md) 和
-[桌面程序控制通道](docs/desktop-control-channel.md)。
+程序调用接口见 [桌面程序控制通道](docs/desktop-control-channel.md)，
+Dots 的房间、附件和身份处理见 [Dots 适配](docs/dots-adapter.md)。
 
-## 运行模式
+## 当前边界
 
-### Desktop control（CDP）
+- Dots 与原生用户问题快照绑定桌面版本 `26.1002.52244`，升级桌面后可能需要更新适配。
+- 普通权限审批尚无完整的快照补读；非阻塞用户问题有单独快照适配。
+- Dots 接收采用前台轮询，暂不支持语音、创建 Dot 和复杂交互审批。
+- 桌面新任务的云端工作位置选择尚未接入。
+- 自动化覆盖受控 Electron 和浏览器链路，真实账户兼容性仍需实际使用确认。
+- 当前访问口令方案适用于可信局域网；跨不可信网络连接应增加 HTTPS 和正式身份认证。
 
-已开启 CDP 的桌面可直接通过程序网关接入。以下为源码构建后的示例：
-
-```bash
-npm run build:package
-HOST=0.0.0.0 \
-CODEX_MOBILE_TOKEN='<至少 16 字符的随机口令>' \
-CODEX_MOBILE_CDP_URL=http://127.0.0.1:9333 \
-node bin/codex-mobile.mjs control --port 19877
-```
-
-`control` 默认端口为 `19878`；菜单栏启动器默认使用 `19877`。桌面 CDP 始终只开放在
-回环地址，手机通过鉴权网关连接。程序接口支持项目、会话、历史、消息发送与引导、
-停止任务及回答审批。非阻塞问题读取当前订阅会话的原生请求快照。
-
-
-### Managed（`start` 默认）
-
-网关自动启动并管理一个仅监听回环地址的 app-server：
-
-```bash
-CODEX_APP_SERVER_MODE=managed \
-CODEX_APP_SERVER_PORT=18765 \
-codex-mobile start
-```
-
-原始 app-server 不应监听局域网地址，只有网关对外提供服务。
-
-### External
-
-连接已经运行的 app-server，网关不管理其生命周期：
-
-```bash
-CODEX_APP_SERVER_MODE=external \
-CODEX_APP_SERVER_URL=ws://127.0.0.1:18765 \
-codex-mobile start
-```
-
-### Gateway-only
-
-移动 App 已内置前端时，后端可以只提供控制面和 WebSocket：
-
-```bash
-CODEX_MOBILE_SERVE_STATIC=false codex-mobile start
-```
-
-此时网关根路径返回 `404`，`/api/*` 和 `/ws` 仍可使用。
-
-## 配置
-
-| 环境变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `HOST` | `127.0.0.1` | 网关监听地址；局域网访问使用 `0.0.0.0` |
-| `PORT` | `18766` | 网关端口，也可通过 `start --port` 指定 |
-| `CODEX_MOBILE_TOKEN` | 空 | 访问口令；非回环监听时必填 |
-| `CODEX_MOBILE_HOST_ID` | 自动生成 | 稳定的设备标识 |
-| `CODEX_MOBILE_HOST_NAME` | 主机名 | 客户端展示的设备名称 |
-| `CODEX_MOBILE_UPLOAD_DIR` | `~/.codex/codex-mobile-uploads` | 图片以外附件的上传目录 |
-| `CODEX_MOBILE_SERVE_STATIC` | `true` | 设为 `false` 启用 gateway-only |
-| `CODEX_APP_SERVER_MODE` | `managed` | `managed` 或 `external` |
-| `CODEX_APP_SERVER_PORT` | `18765` | Managed app-server 回环端口 |
-| `CODEX_APP_SERVER_URL` | `ws://127.0.0.1:18765` | External 模式的上游地址 |
-| `CODEX_MOBILE_CDP_URL` | `http://127.0.0.1:9333` | `control` 模式的本机桌面 CDP 地址 |
-| `CODEX_HOME` | `~/.codex` | Codex 状态目录 |
-
-内置 App 可能发送 `Origin: null` 或其他本地页面 Origin。网关允许跨来源访问控制面，
-但 HTTP API 和 WebSocket 始终需要正确 Token。
-
-## 从源码开发
-
-```bash
-git clone https://github.com/loock-ai/codex-mobile.git
-cd codex-mobile
-npm install
-npm run dev
-```
-
-开发模式同时运行：
-
-- Vite：`http://0.0.0.0:5173`，提供前端和 HMR；
-- 网关：`http://0.0.0.0:18766`；
-- Managed app-server：`ws://127.0.0.1:18765`。
-
-`npm run dev` 默认读取：
-
-```text
-~/Library/Application Support/CodexMobileWeb/gateway.env
-```
-
-示例配置：
-
-```bash
-export HOST='0.0.0.0'
-export PORT='18766'
-export CODEX_APP_SERVER_MODE='managed'
-export CODEX_APP_SERVER_PORT='18765'
-export CODEX_MOBILE_HOST_ID='macbook-pro'
-export CODEX_MOBILE_HOST_NAME='MacBook Pro'
-export CODEX_MOBILE_SERVE_STATIC='false'
-export CODEX_MOBILE_TOKEN='<独立口令>'
-```
-
-### 验证
+## 开发与验证
 
 ```bash
 npm run typecheck
 npm test
-npm run build
-npm run test:e2e
+npm run build:launcher
 ```
 
-## 移动端构建
+启动器、桌面通道和 Dots 的受控浏览器测试：
 
-[最新 GitHub Release](https://github.com/loock-ai/codex-mobile/releases/latest) 提供：
-
-- Android APK 及 SHA-256 校验文件；
-- 未签名 iOS IPA 及 SHA-256 校验文件。
-
-Android App 会检查正式 Release，发现新版本后由用户确认下载，校验成功后调起系统
-安装器。首次使用需要在 Android 系统中允许 Codex Mobile 安装未知应用，App 不支持
-静默安装。
-
-iOS IPA 未签名，安装到真实设备或上传 TestFlight 前仍需使用 Apple Developer 证书
-签名。
-
-仓库使用固定提交的 PakePlus Android/iOS 项目作为原生容器，并把当前 `dist/` 静态
-资源内置到 App。构建产物不包含局域网 IP、网关 Token 或其他私人配置。
-
-发布流程：
-
-- `main` 的应用相关代码变化会触发 Android、iOS 构建和 GitHub Release；
-- npm 包只在网关、CLI 或包配置变化时随同发布，也可在手动工作流中显式启用；
-- Android、iOS 与同次发布的 npm 包共用一个解析后的版本号。
-
-相关工作流：
-
-- [build-android.yml](.github/workflows/build-android.yml)
-- [build-ios.yml](.github/workflows/build-ios.yml)
-- [publish-npm.yml](.github/workflows/publish-npm.yml)
-
-## 项目结构
-
-```text
-codex-mobile/
-├── bin/                  # npm CLI、访问地址和终端二维码
-├── src/
-│   ├── app-server/       # V2 客户端、会话恢复、分页与列表加载
-│   ├── backends/         # 多设备注册表、探测和连接管理
-│   ├── features/         # 会话、列表、审批、Dots、设置和设备管理 UI
-│   └── ui/               # 消息、附件、图标和展示辅助逻辑
-├── launcher/             # macOS 菜单栏启动器与设置面板
-├── server/
-│   ├── cdp/              # 桌面结构化控制通道
-│   ├── dots/             # Dots 房间、附件与 HTTP 适配
-│   └── launcher/         # 启动器服务与桌面进程管理
-├── tests/                # 协议、服务端、UI、CI 和移动端 E2E 测试
-├── protocol/             # app-server V2 协议基准与生成物
-├── docs/plans/           # 设计与实施记录
-└── .github/workflows/    # 移动端和 npm 发布流水线
+```bash
+RUN_CDP_FIXTURE=1 npx vitest run \
+  tests/server/launcher-panel.integration.test.ts \
+  tests/server/control-interactive.integration.test.ts \
+  tests/server/dots-web.integration.test.ts
 ```
-
-协议基准见
-[`protocol/app-server-v2/README.md`](protocol/app-server-v2/README.md)，总体设计见
-[`docs/plans/2026-07-26-codex-mobile-web-design.md`](docs/plans/2026-07-26-codex-mobile-web-design.md)。
-
-## 安全与仓库边界
-
-- 非回环监听必须配置 Token；当前 Token 方案适用于可信局域网。
-- 跨不可信网络使用时，应增加 HTTPS、可信反向代理和正式身份认证。
-- 公开仓库和正式构建产物不包含局域网地址、访问口令、Codex 登录态、API 密钥、
-  本机会话、用户项目内容或移动端签名材料。
-- App 中保存的设备地址和 Token 位于客户端本地存储，不会提交到本仓库。
-
-## 已知边界
-
-- Dots 与原生用户问题快照适配当前绑定桌面版本 `26.1002.52244`；桌面升级后可能需要更新适配。
-- CDP 普通权限审批尚无完整快照补读；非阻塞用户问题有单独快照适配。
-- Dots 接收为轮询，暂不支持语音、创建 Dot 和复杂交互审批。当前只验证了受控 Electron 与浏览器链路，真实账户兼容性需实际使用确认。
-- 桌面新任务的云端工作位置选择尚未接入。
-
-- Codex app-server 协议会随 CLI 版本演进；分页、置顶等能力以实际运行版本为准。
-- 大型会话的 `thread/read(includeTurns:true)` 响应可能很大，正常路径优先使用
-  `thread/resume` 初始分页和 `thread/turns/list`。
-- app-server 的持久化 `ThreadItem` 可能是有损表示，前端也会合并逻辑回合。
-- 不同 app-server 进程之间没有全局实时状态。Codex Desktop 与本项目使用独立进程
-  时，网页无法仅靠 V2 列表接口准确显示桌面进程正在执行的任务；需要桌面同步时使用 CDP 模式。
-- iOS 自动化产物未签名；正式分发不在无证书构建范围内。
 
 ## 许可证
 
