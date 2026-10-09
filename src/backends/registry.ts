@@ -1,3 +1,4 @@
+import {hostPreferences} from "./host-selection";
 import type {
   BackendConfig,
   BackendRegistry,
@@ -148,6 +149,7 @@ function normalizedBackends(value: unknown) {
       baseUrl,
       token: typeof source.token === "string" ? source.token : "",
       ...(source.remoteProjects === true ? {remoteProjects:true} : {}),
+      ...hostPreferences(source),
       enabled: source.enabled !== false,
       order,
     });
@@ -328,6 +330,7 @@ export function upsertBackend(
     baseUrl,
     token: value.token,
     ...(value.remoteProjects === true ? {remoteProjects:true} : {}),
+    ...hostPreferences(value),
     enabled: value.enabled,
     order: value.order,
   };

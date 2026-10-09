@@ -1,4 +1,8 @@
+export interface DesktopHost { hostId: string; displayName: string }
+
 export interface BackendConfig {
+  desktopHosts?: DesktopHost[];
+  visibleHostIds?: string[];
   id: string;
   hostId?: string;
   remoteProjects?: boolean;

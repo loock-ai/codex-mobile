@@ -104,8 +104,18 @@ await client.request('desktop/approval/respond', {
 
 ## 模型、远程项目与历史修复
 
-当前版本增加model/list。Web中的模型与思考强度选择只在显式选择后发送，权限继续由桌面控制。设备连接弹窗增加“远程项目”开关；通过鉴权/api/desktop/hosts读取桌面已配置为连接的SSH/remote-control/WSL主机最小信息，以独立hostId握手。/api/projects与/api/host接受hostId参数；虚拟设备只存在于运行时，原始设备注册表只保存开关。
+当前版本增加model/list。Web中的模型与思考强度选择只在显式选择后发送，权限默认沿用桌面，也支持显式选择桌面允许的权限配置。设备连接测试成功后，通过鉴权 `/api/desktop/hosts` 检测主机，在选择弹窗中按主机决定是否展示。设备管理以父连接、子主机两级展示，子级开关与弹窗共用 `visibleHostIds` 配置，主机名称与 ID 缓存为 `desktopHosts`。本机显示系统电脑名称并附“本机”标识；macOS 使用 ComputerName，获取失败则退回网络主机名，内部 hostId 仍为 local。本机也可隐藏，全部隐藏后仍能进入管理恢复。虚拟远程设备只在运行时展开，只有勾选的主机会连接并展示项目、会话；新发现的主机默认不勾选，消失主机的选择保留以便再次上线。旧 `remoteProjects=true` 配置首次发现时迁移为明确的主机集合。各远程主机以独立 hostId 握手，`/api/projects` 与 `/api/host` 接受 hostId 参数。
 
 分块解析现在过滤不属于控制通道的响应；自身响应按64MiB组装资源预算限制，大只读响应返回RESPONSE_TOO_LARGE并减小历史分页，大写入响应返回ACTION_WRITE_UNKNOWN。历史页附加__desktopSnapshotSequence，Web据此重放快照之后的事件，持续产生消息时也可以打开会话。
 
 412项测试通过，真实受控Web和IPC集成2项通过。该验证未操作用户真实ChatGPT或远程主机会话。
+
+## 附件、图片与权限选择（2026-10-09）
+
+结构化 desktop-control 通道支持上传文件和图片：Web 经鉴权的 `POST /api/uploads/file` 上传到所选 host，服务器通过桌面 `fs/createDirectory`、`fs/writeFile` 写入 `/tmp/codex-mobile-uploads/<随机名>`。单文件上限 20 MiB；图片以 `localImage` 路径随下一条消息提交，其他文件以文件路径引用提交。临时文件目前不自动清理。公网 WebSocket 不开放任意 `fs/writeFile` 或 `fs/createDirectory` 调用。
+
+历史中的相对图片路径使用会话 cwd 解析，并通过该会话的 host 执行 `fs/readFile`。文件必须实际存在于所选电脑；缺少会话目录时显示错误。推理摘要保留各段索引，使用 Markdown 渲染粗体标题。
+
+权限入口直接显示桌面返回的权限名称（如“只读”“工作区访问”“完全访问”），未返回时显示“权限未获取”，选择后在下一次发送中提交权限配置、审批策略与审核者。权限配置按当前会话 cwd 完整分页，并只展示桌面允许使用的选项。附件写入结果未知与消息提交结果未知使用不同错误码：前者保留草稿，后者不自动重发。
+
+验证：全量 417 项测试通过，启动器构建通过；受控 Electron 测试覆盖图片和普通文件上传、settings.png 读取、推理粗体及权限参数传递。真实桌面账户与远程主机仍需用户验收。

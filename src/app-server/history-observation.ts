@@ -1,4 +1,5 @@
 import {applyTurnStarted,applyCompletedTurn,applyTurnItem,applyTurnDiff,applyFileChangePatch} from '../ui/conversation';
+import {appendReasoningDelta} from '../ui/reasoning';
 type RecordValue=Record<string,any>;
 interface HistoryEvent {method?:string;params?:unknown;sequence?:number}
 export interface HistoryObservation {threadId:string;events:HistoryEvent[];items:Map<string,number>;turns:Map<string,number>;baseSequence:number;counter:number}
@@ -41,7 +42,8 @@ export function mergeObservedHistory(snapshot:RecordValue,live:RecordValue|null,
    if(!turn){result=applyTurnStarted(result,{threadId:snapshot.id,turn:{id:turnId,status:'inProgress',items:[]}});turn=result.turns.find((entry:RecordValue)=>entry.id===turnId);}
    let item=turn.items?.find((entry:RecordValue)=>entry.id===itemId);
    if(!item){item={id:itemId,type:method.includes('commandExecution')?'commandExecution':method.includes('fileChange')?'fileChange':method.includes('reasoning')?'reasoning':'agentMessage'};(turn.items??=[]).push(item);}
-   const field=method.includes('commandExecution')||method.includes('fileChange')?'aggregatedOutput':'text';item[field]=`${item[field]??''}${p.delta}`;
+   if(method.includes('reasoning'))appendReasoningDelta(item,method,p);
+   else{const field=method.includes('commandExecution')||method.includes('fileChange')?'aggregatedOutput':'text';item[field]=`${item[field]??''}${p.delta}`;}
   }
  }
  return result;

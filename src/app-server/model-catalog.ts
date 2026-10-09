@@ -10,3 +10,8 @@ export async function loadDesktopModels(client:{request(method:string,params:unk
  }
  return {data:[...models.values()]};
 }
+export async function loadDesktopPermissions(client:{request(method:string,params:unknown):Promise<any>},cwd:string|null=null):Promise<{data:Record<string,any>[]}>{
+ const data:Record<string,any>[]=[],seen=new Set<string>();let cursor:string|null=null;
+ for(let page=0;;page++){if(page>=100)throw new Error(t('权限列表分页超过限制'));const result=await client.request('permissionProfile/list',{cwd,limit:100,cursor});if(!Array.isArray(result.data))throw new Error(t('权限列表响应无效'));data.push(...result.data);cursor=result.nextCursor??null;if(!cursor)break;if(seen.has(cursor))throw new Error(t('权限列表游标重复'));seen.add(cursor);}
+ return {data};
+}

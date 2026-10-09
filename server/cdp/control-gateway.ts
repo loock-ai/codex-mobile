@@ -47,6 +47,7 @@ export async function createControlGateway(options:{channel:DesktopControlChanne
      if(!state.delivered.has(id))throw new ControlError('APPROVAL_EXPIRED','当前客户端没有该审批');
      try{await options.channel.respond(id,result);}finally{statusChanged();}state.delivered.delete(id);if(message.method)reply({submitted:true,confirmed:false});else send(socket,{method:'desktop/approval/submitted',params:{id}});return;
     }
+    if(['fs/writeFile','fs/createDirectory'].includes(message.method))throw new ControlError('UNSUPPORTED_METHOD','请使用附件上传接口');
     const result=await options.channel.request(state.hostId,message.method,p);
     reply(result);
    }catch(error){send(socket,{id:message.id,error:{code:-32000,message:error instanceof Error?error.message:String(error),data:{code:error instanceof ControlError?error.code:'INTERNAL_ERROR'}}});}

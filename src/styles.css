@@ -524,3 +524,15 @@ button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; 
 .permission-options > button { min-height: 70px; }
 .popover-link { min-height: 58px; }
 .popover-title { padding-top: 3px; padding-bottom: 8px; }
+
+.backend-host-tree { grid-column: 1 / -1; min-width: 0; margin: 0 0 0 12px; padding: 0 0 0 12px; border-left: 2px solid #ececec; }
+.backend-host-tree summary { cursor: pointer; color: #777; font-size: 12px; padding: 5px 0; }
+.backend-host-choices { display: grid; gap: 3px; }
+.backend-host-choice { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 54px; padding: 8px 0; }
+.backend-host-choice .backend-host-identity { display: grid; gap: 3px; min-width: 0; flex: 1; }
+.backend-host-choice .backend-host-identity strong { color: #222; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+.backend-host-choice .backend-host-identity small { color: #777; font-size: 11px; overflow-wrap: anywhere; white-space: normal; grid-column: auto; }
+.backend-host-choice .backend-host-toggle { display: flex; flex-shrink: 0; align-items: center; gap: 8px; font-size: 12px; color: #555; }
+.backend-host-toggle input { width: 18px; height: 18px; margin: 0; accent-color: #171717; }
+.backend-host-picker > p { color: #777; font-size: 13px; line-height: 1.6; }
+.backend-host-picker .backend-host-choices { margin-bottom: 18px; }

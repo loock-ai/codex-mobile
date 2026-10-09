@@ -7,8 +7,10 @@ import {
   useState,
 } from "react";
 import {createHistoryObservation,observeHistoryEvent,mergeObservedHistory,isHistoryEvent,observingHistoryClient,type HistoryObservation} from "./app-server/history-observation";
-import {loadDesktopModels} from "./app-server/model-catalog";
-import {useDesktopBackends} from "./backends/desktop-hosts";
+import {appendReasoningDelta} from "./ui/reasoning";
+import {loadDesktopModels,loadDesktopPermissions} from "./app-server/model-catalog";
+import {useDesktopBackends,type DesktopHost} from "./backends/desktop-hosts";
+import {displayedHostIds} from "./backends/host-selection";
 import { AppServerClient, type RpcMessage } from "./app-server/client";
 import {
   createLatestThreadListLoader,
@@ -75,7 +77,7 @@ import {
   type DraftImage,
   type DraftFile,
 } from "./ui/attachments";
-import { uploadFile } from "./backends/file-upload";
+import { uploadFile,uploadConversationAttachments } from "./backends/file-upload";
 import {
   effortOptionsForModel,
   defaultNewChatPermissionMode,
@@ -218,6 +220,7 @@ function BackendWorkspace({
   const [permissionProfiles, setPermissionProfiles] = useState<AnyRecord[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
   const [desktopModelOverride,setDesktopModelOverride]=useState(false);
+  const [desktopPermissionOverride,setDesktopPermissionOverride]=useState(false);
   const [selectedEffort, setSelectedEffort] = useState<string | null>(null);
   const [selectedServiceTier, setSelectedServiceTier] = useState<string | null>(null);
   const [selectedPermission, setSelectedPermission] = useState("");
@@ -666,7 +669,8 @@ function BackendWorkspace({
               );
               const item = turn?.items?.find((entry: AnyRecord) => entry.id === params.itemId);
               if (!item) return current;
-              if (item) {
+              if (item && streamMethod.includes("reasoning")) appendReasoningDelta(item,streamMethod,params);
+              else if (item) {
                 const key = streamMethod.includes("commandExecution") || streamMethod.includes("fileChange")
                   ? "aggregatedOutput"
                   : "text";
@@ -785,7 +789,7 @@ function BackendWorkspace({
       },
       onReady: (_backendId, source) => {
         const client = source as AppServerClient;
-        setDesktopModelOverride(false);
+        setDesktopModelOverride(false);setDesktopPermissionOverride(false);
         clientRef.current = client;
         void (async () => {
           let observation:HistoryObservation|null=null;
@@ -797,7 +801,7 @@ function BackendWorkspace({
               configResult,
               rateLimitResult,
             ] = await (client.backend === "desktop-control"
-              ? Promise.all([loadDesktopModels(client).catch(reason=>({data:[] as AnyRecord[],error:reason instanceof Error?reason.message:String(reason)})), Promise.resolve({data:[] as AnyRecord[]}), Promise.resolve({config:{} as AnyRecord}), Promise.resolve(null)] as const)
+              ? Promise.all([loadDesktopModels(client).catch(reason=>({data:[] as AnyRecord[],error:reason instanceof Error?reason.message:String(reason)})), loadDesktopPermissions(client).catch(reason=>({data:[] as AnyRecord[],error:reason instanceof Error?reason.message:String(reason)})), Promise.resolve({config:{} as AnyRecord}), Promise.resolve(null)] as const)
               : Promise.all([
               client.request<{ data: AnyRecord[] }>("model/list", {
                 limit: 100,
@@ -818,6 +822,7 @@ function BackendWorkspace({
                 .catch(() => null),
             ]));
             if (disposed || manager.client(backend.id) !== source) return;
+            if("error" in permissionResult&&permissionResult.error)setError(t("权限列表加载失败：{message}",{message:String(permissionResult.error)}));
             const availableProfiles = permissionResult.data.filter(
               (profile) => profile.allowed,
             );
@@ -842,7 +847,7 @@ function BackendWorkspace({
                 : typeof config.sandbox_mode === "string"
                   ? `:${config.sandbox_mode}`
                   : "";
-            const configuredPermission =
+            const configuredPermission = client.backend === "desktop-control" ? "" :
               availableProfiles.find((profile) => profile.id === sandboxProfileId)
                 ?.id ||
               availableProfiles.find((profile) => profile.id === ":workspace")?.id ||
@@ -1078,12 +1083,13 @@ function BackendWorkspace({
       setConversationLoadError("");
 
 
-      if (session.thread.cwd && client.backend !== "desktop-control") {
-        void client
-          .request<{ data: AnyRecord[] }>("permissionProfile/list", {
-            limit: 100,
-            cwd: session.thread.cwd,
-          })
+      if (session.thread.cwd) {
+        void (client.backend === "desktop-control"
+          ? loadDesktopPermissions(client, session.thread.cwd)
+          : client.request<{ data: AnyRecord[] }>("permissionProfile/list", {
+              limit: 100,
+              cwd: session.thread.cwd,
+            }))
           .then((result) => {
             if (sequence === openSequenceRef.current) {
               setPermissionProfiles(result.data.filter((profile) => profile.allowed));
@@ -1125,7 +1131,7 @@ function BackendWorkspace({
   function openThread(thread: AnyRecord) {
     setRequests(current=>current.filter(request=>(request.params as AnyRecord)?.threadId===thread.id));setApprovalError('');
     const sequence = ++openSequenceRef.current;
-    setDesktopModelOverride(false);
+    setDesktopModelOverride(false);setDesktopPermissionOverride(false);
     markThreadRead(String(thread.id));
     resetDraftContext();
     setDraft("");
@@ -1260,10 +1266,10 @@ function BackendWorkspace({
     let sent = false;
     try {
       setImageReading(Boolean(pendingFiles.length));
-      const uploadedFiles = await Promise.all(
-        pendingFiles.map((file) => uploadFile(backend, file.file)),
-      );
+      const uploads=await uploadConversationAttachments(backend,pendingImages,pendingFiles.map(file=>file.file),clientRef.current.backend==='desktop-control');
+      const uploadedFiles=uploads.files;
       const shouldSendSettings = clientRef.current.backend !== "desktop-control" && (!thread?.id || activeSettingsSynchronized);
+      const shouldSendPermissions = shouldSendSettings || (clientRef.current.backend === "desktop-control" && desktopPermissionOverride);
       const shouldSendModel = shouldSendSettings || (clientRef.current.backend === "desktop-control" && desktopModelOverride);
       const effectivePermission =
         !thread?.id && newChatPermissionMode
@@ -1290,8 +1296,8 @@ function BackendWorkspace({
           cwd: thread?.cwd ?? null,
           ...(shouldSendModel && selectedModel ? { model: selectedModel } : {}),
           ...(clientRef.current.backend !== 'desktop-control' && selectedServiceTier ? { serviceTier: selectedServiceTier } : {}),
-          ...(clientRef.current.backend !== 'desktop-control' && effectivePermission ? { permissions: effectivePermission } : {}),
-          ...(clientRef.current.backend !== "desktop-control" ? {approvalPolicy: effectiveApprovalPolicy, approvalsReviewer: effectiveApprovalsReviewer} : {}),
+          ...(shouldSendPermissions && effectivePermission ? { permissions: effectivePermission } : {}),
+          ...(shouldSendPermissions ? {approvalPolicy: effectiveApprovalPolicy, approvalsReviewer: effectiveApprovalsReviewer} : {}),
         });
         thread = started.thread;
         setThreads((current) => [
@@ -1352,7 +1358,7 @@ function BackendWorkspace({
       }
       const startedTurn = await clientRef.current.request<{ turn: AnyRecord }>("turn/start", {
         threadId: thread.id,
-        input: buildTurnInput(text, pendingImages, uploadedFiles),
+        input: clientRef.current.backend==='desktop-control'?[...buildTurnInput(text,[],uploadedFiles),...uploads.imagePaths.map(path=>({type:'localImage',path}))]:buildTurnInput(text,pendingImages,uploadedFiles),
         ...(shouldSendModel && selectedModel ? { model: selectedModel } : {}),
         ...(shouldSendModel && selectedEffort
           ? { effort: selectedEffort }
@@ -1360,10 +1366,10 @@ function BackendWorkspace({
         ...(shouldSendSettings && selectedServiceTier
           ? { serviceTier: selectedServiceTier }
           : {}),
-        ...(shouldSendSettings && effectivePermission
+        ...(shouldSendPermissions && effectivePermission
           ? { permissions: effectivePermission }
           : {}),
-        ...(shouldSendSettings
+        ...(shouldSendPermissions
           ? {
               approvalPolicy: effectiveApprovalPolicy,
               approvalsReviewer: effectiveApprovalsReviewer,
@@ -1398,10 +1404,10 @@ function BackendWorkspace({
             : current,
         );
         if ((reason as {code?:string})?.code !== "ACTION_WRITE_UNKNOWN") setDraft((current) => current || text);
-        setDraftImages((current) => mergeDraftImages(current, pendingImages));
-        setDraftFiles((current) =>
-          current.length ? current : pendingFiles,
-        );
+        if((reason as {code?:string})?.code !== 'ACTION_WRITE_UNKNOWN'){
+          setDraftImages((current) => mergeDraftImages(current, pendingImages));
+          setDraftFiles((current) => current.length ? current : pendingFiles);
+        }
         setError(reason instanceof Error ? reason.message : String(reason));
       }
     } finally {
@@ -1437,12 +1443,13 @@ function BackendWorkspace({
       );
       if (!imageReadGenerationRef.current.isCurrent(generation)) return;
       const attachmentResult = prepareAttachmentFiles(
-        attachmentFiles,
+        clientRef.current?.backend==='desktop-control'?attachmentFiles.filter(file=>file.size<=20*1024*1024):attachmentFiles,
         draftFiles.length,
       );
       setDraftImages((current) => mergeDraftImages(current, result.images));
       setDraftFiles((current) => [...current, ...attachmentResult.files].slice(0, 4));
-      const errors = [...result.errors, ...attachmentResult.errors];
+      const sizeErrors=clientRef.current?.backend==='desktop-control'?attachmentFiles.filter(file=>file.size>20*1024*1024).map(file=>t("{name} 超过桌面上传限制 20 MB",{name:file.name})):[];
+      const errors = [...result.errors, ...attachmentResult.errors,...sizeErrors];
       if (errors.length) setError(errors.join("；"));
       else setError("");
     } finally {
@@ -1614,8 +1621,9 @@ function BackendWorkspace({
   const selectedPermissionMode = permissionModes.find(
     (mode) => mode.id === selectedPermissionModeId,
   );
-  const selectedPermissionLabel =
-    !activeSettingsSynchronized && active?.id
+  const selectedPermissionLabel = clientRef.current?.backend === "desktop-control"
+    ? (selectedPermission ? permissionProfileLabel(selectedPermission, permissionProfiles.find(profile => profile.id === selectedPermission)?.description) : t("权限未获取"))
+    : !activeSettingsSynchronized && active?.id
       ? t("沿用线程权限")
       : selectedPermissionMode?.label ??
         permissionProfileLabel(
@@ -1639,6 +1647,7 @@ function BackendWorkspace({
   const choosePermissionMode = (modeId: PermissionModeId) => {
     const mode = permissionModes.find((option) => option.id === modeId);
     if (!mode) return;
+    if(clientRef.current?.backend === "desktop-control")setDesktopPermissionOverride(true);
     setSelectedPermission(mode.permissions);
     setSelectedApprovalPolicy(mode.approvalPolicy);
     setSelectedApprovalsReviewer(mode.approvalsReviewer);
@@ -1689,7 +1698,7 @@ function BackendWorkspace({
     nextDraftFiles: DraftFile[] = [],
   ) => {
     setRequests([]);setApprovalError('');setUserAnswers({});
-    setDesktopModelOverride(false);if(clientRef.current?.backend==='desktop-control'){setSelectedModel('');setSelectedEffort(null);}
+    setDesktopModelOverride(false);setDesktopPermissionOverride(false);if(clientRef.current?.backend==='desktop-control'){setSelectedModel('');setSelectedEffort(null);}
     if(clientRef.current?.backend==='desktop-control')void clientRef.current.request('desktop/unsubscribe',{}).catch(()=>{});
     const savedCwd = window.localStorage.getItem(
       `codex-mobile:new-chat-project:${backend.id}`,
@@ -1702,10 +1711,11 @@ function BackendWorkspace({
     openSequenceRef.current += 1;
     activeThreadTargetRef.current = null;
     resetDraftContext();
-    const defaultPermissionMode =
+    const defaultPermissionMode = clientRef.current?.backend==='desktop-control'?null:
       defaultNewChatPermissionMode(
         permissionProfiles as Array<{ id: string; allowed?: boolean }>,
       );
+    if(clientRef.current?.backend==='desktop-control'){setNewChatPermissionMode(null);setSelectedPermission('');}
     setOpeningThreadId("");
     setBusy(false);
     setStartingThreadContext(null);
@@ -1844,6 +1854,7 @@ function BackendWorkspace({
           modelSelectionAvailable={models.length>0}
           selectedModelLabel={selectedModelLabel}
           selectedEffort={selectedEffort}
+          permissionSelectionAvailable={permissionModes.length>0}
           selectedPermissionLabel={selectedPermissionLabel}
           imageInputRef={imageInputRef}
           onBack={onOpenSidebar}
@@ -2066,7 +2077,18 @@ function ConfiguredApp({
     closeSidebar,
     refresh: refreshAllBackends,
   } = useSidebarRefresh(resetListExpansion);
-  const desktopBackends=useDesktopBackends(registry.backends,refreshVersion);
+  const saveDiscoveredHosts=useCallback((source:BackendConfig,hosts:DesktopHost[])=>{
+    setRegistry(current=>{
+      const target=current.backends.find(b=>b.id===source.id);
+      if(!target||target.baseUrl!==source.baseUrl||target.token!==source.token)return current;
+      if(JSON.stringify(target.desktopHosts)!==JSON.stringify(source.desktopHosts))return current;
+      const visibleHostIds=displayedHostIds(target,hosts);
+      if(JSON.stringify(target.desktopHosts)===JSON.stringify(hosts)&&target.visibleHostIds!==undefined)return current;
+      const next={...current,backends:current.backends.map(b=>b.id===source.id?{...b,desktopHosts:hosts,visibleHostIds,remoteProjects:false}:b)};
+      saveBackendRegistry(window.localStorage,next);return next;
+    });
+  },[]);
+  const desktopBackends=useDesktopBackends(registry.backends,refreshVersion,saveDiscoveredHosts);
   const runtimeBackends=desktopBackends.backends;
   const selectListBackend = useCallback((backendId: string) => {
     window.localStorage.setItem("codex-mobile:list-backend", backendId);
@@ -2165,13 +2187,7 @@ function ConfiguredApp({
     () => runtimeBackends.filter((backend) => backend.enabled),
     [runtimeBackends],
   );
-  const mountedBackends = useMemo(
-    () =>
-      enabledBackends.length
-        ? enabledBackends
-        : registry.backends.slice(0, 1),
-    [enabledBackends, registry.backends],
-  );
+  const mountedBackends = enabledBackends;
   const selectedBackend =
     mountedBackends.find(
       (backend) => backend.id === (runtimeSelection ?? registry.selectedBackendId),
@@ -2187,7 +2203,6 @@ function ConfiguredApp({
   }, [listBackendId, mountedBackends, selectListBackend]);
 
   const persistRegistry = useCallback((next: BackendRegistry) => {
-    setRuntimeSelection(null);
     saveBackendRegistry(window.localStorage, next);
     setRegistry(
       loadBackendRegistry(window.localStorage, window.location.origin),
@@ -2443,7 +2458,9 @@ function ConfiguredApp({
   );
 
   if (!selectedBackend) {
-    return <main className="app-shell"><div className="empty-state">{t("没有可用设备")}</div></main>;
+    return <main className="app-shell"><div className="empty-state"><p>{t("没有展示的主机，请在设备管理中开启。")}</p><button type="button" onClick={()=>setManagerOpen(true)}>{t("管理设备")}</button></div>
+      <BackendManagerSheet open={managerOpen} registry={registry} summaries={summaries} onChange={persistRegistry} onClose={()=>setManagerOpen(false)}/>
+    </main>;
   }
 
   return (

@@ -26,6 +26,7 @@ import {
   isPreviewableVideoPath,
 } from "./sheets/RemoteFileSheets";
 import { t, getActiveLocale } from "../../i18n";
+import {reasoningText} from '../../ui/reasoning';
 import {
   FileDiffSheet,
   ToolDetailSheet,
@@ -34,6 +35,7 @@ import {
 type AnyRecord = Record<string, any>;
 
 function itemText(item: AnyRecord) {
+  if(/reasoning/i.test(String(item.type??'')))return reasoningText(item);
   if (typeof item.aggregatedOutput === "string") return item.aggregatedOutput;
   if (typeof item.text === "string") return item.text;
   if (typeof item.content === "string") return item.content;
@@ -244,7 +246,7 @@ function TimelineItem({
   const images = imageSourcesForItem(item);
   if (images.length) return <ImageGallery images={images} client={client} />;
   if (/reasoning/i.test(type)) {
-    return displayText ? <div className="reasoning">{displayText}</div> : null;
+    return displayText ? <div className="reasoning"><MarkdownMessage text={displayText}/></div> : null;
   }
   return displayText ? (
     <div className="assistant-message">

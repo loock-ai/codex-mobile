@@ -1,3 +1,4 @@
+import {RemoteFileCwdContext} from "./sheets/RemoteFileContext";
 import {
   type FormEvent,
   type RefObject,
@@ -136,6 +137,7 @@ export function ConversationPage({
   modelSelectionAvailable = true,
   selectedEffort,
   selectedPermissionLabel,
+  permissionSelectionAvailable=true,
   imageInputRef,
   onBack,
   onNewChatBackendChange,
@@ -183,6 +185,7 @@ export function ConversationPage({
   modelSelectionAvailable?: boolean;
   selectedEffort: string | null;
   selectedPermissionLabel: string;
+  permissionSelectionAvailable?: boolean;
   imageInputRef: RefObject<HTMLInputElement | null>;
   onBack: () => void;
   onNewChatBackendChange: (backendId: string) => void;
@@ -251,7 +254,7 @@ export function ConversationPage({
     }
   };
   return (
-    <section className="conversation">
+    <RemoteFileCwdContext.Provider value={active.cwd??null}><section className="conversation">
       <header className="conversation-header">
         <button
           className="round-button"
@@ -566,10 +569,10 @@ export function ConversationPage({
             {selectedServiceTier ? "⚡ " : ""}
             {selectedModelLabel} {effortLabel(selectedEffort)}
           </button>
-          {client?.backend === "desktop-control" ? <span>{t("沿用桌面权限")}</span> : <button
+          {<button
             type="button"
             aria-label={t("选择审批与权限模式")}
-            disabled={!interactive}
+            disabled={!interactive || !permissionSelectionAvailable || busy}
             onClick={onOpenPermissionSettings}
           >
             {selectedPermissionLabel}
@@ -596,7 +599,7 @@ export function ConversationPage({
             aria-label={t("添加附件")}
             disabled={
               !interactive ||
-              desktopBridge ||
+              client?.backend === "desktop-cdp" ||
               realtimeActive ||
               imageReading
             }
@@ -652,6 +655,6 @@ export function ConversationPage({
         rateLimits={rateLimits}
         onClose={() => setStatusOpen(false)}
       />
-    </section>
+    </section></RemoteFileCwdContext.Provider>
   );
 }

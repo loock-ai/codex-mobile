@@ -2,24 +2,28 @@ import type {IncomingMessage,ServerResponse} from 'node:http';
 import {readFile,stat} from 'node:fs/promises';
 import {resolve,sep,extname} from 'node:path';
 import {hostname} from 'node:os';
+import {readComputerName} from '../computer-name.js';
 import type {DesktopControlChannel} from './control-channel.js';
+import {uploadToDesktop} from './control-upload.js';
 
 export function controlHttp(options:{channel:DesktopControlChannel;token:string;staticDir?:string}){
+ const computerName=readComputerName();
  return async(req:IncomingMessage,res:ServerResponse)=>{
   try{
    const url=new URL(req.url??'/','http://localhost'),api=url.pathname.startsWith('/api/'),authorized=url.searchParams.get('token')===options.token;
-   if(api&&authorized&&req.headers.origin){res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin');res.setHeader('Access-Control-Allow-Methods','GET, OPTIONS');}
+   if(api&&authorized&&req.headers.origin){res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin');res.setHeader('Access-Control-Allow-Methods','GET, POST, OPTIONS');res.setHeader('Access-Control-Allow-Headers','content-type,x-codex-file-name');res.setHeader('Access-Control-Allow-Credentials','true');}
    if(req.method==='OPTIONS'){res.writeHead(authorized?204:401);res.end();return;}
    if(api&&!authorized){res.writeHead(401);res.end();return;}
-   if(req.method!=='GET'){res.writeHead(405);res.end();return;}
+   if(req.method!=='GET'&&!(req.method==='POST'&&url.pathname==='/api/uploads/file')){res.writeHead(405);res.end();return;}
    if(api){
     res.setHeader('content-type','application/json; charset=utf-8');
     const hostId=url.searchParams.get('hostId')||'local';
     const remote=hostId==='local'?null:(await options.channel.hosts()).find(host=>host.hostId===hostId);
     if(hostId!=='local'&&!remote){res.writeHead(404);res.end(JSON.stringify({error:'桌面没有该远程主机'}));return;}
+    if(url.pathname==='/api/uploads/file'){await uploadToDesktop(req,res,options.channel,hostId);return;}
     if(url.pathname==='/api/status')res.end(JSON.stringify(options.channel.status()));
-    else if(url.pathname==='/api/desktop/hosts')res.end(JSON.stringify({data:await options.channel.hosts()}));
-    else if(url.pathname==='/api/host')res.end(JSON.stringify({hostId:hostname()+'-desktop-control'+(remote?':'+hostId:''),displayName:remote?.displayName??'桌面连接',hostname:hostname(),gatewayVersion:'0.2.0',appServerReady:options.channel.status().connected,backend:'desktop-control'}));
+    else if(url.pathname==='/api/desktop/hosts'){const name=await computerName;res.end(JSON.stringify({data:(await options.channel.hosts()).map(host=>host.hostId==='local'?{...host,displayName:name}:host)}));}
+    else if(url.pathname==='/api/host')res.end(JSON.stringify({hostId:hostname()+'-desktop-control'+(remote?':'+hostId:''),displayName:remote?.displayName??await computerName,hostname:hostname(),gatewayVersion:'0.2.0',appServerReady:options.channel.status().connected,backend:'desktop-control'}));
     else if(url.pathname==='/api/projects'){
      const projects=new Set<string>(),seen=new Set<string>();let cursor:string|null=null;
      for(let count=0;;count++){
@@ -37,6 +41,6 @@ export function controlHttp(options:{channel:DesktopControlChannel;token:string;
    if(!(await stat(file).catch(()=>null))?.isFile())file=resolve(root,'index.html');
    const mime:Record<string,string>={'.html':'text/html; charset=utf-8','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png','.json':'application/json'};
    const body=await readFile(file);res.setHeader('content-type',mime[extname(file)]??'application/octet-stream');res.end(body);
-  }catch(error){res.writeHead(502,{'content-type':'application/json'});res.end(JSON.stringify({error:error instanceof Error?error.message:String(error)}));}
+  }catch(error){res.writeHead(502,{'content-type':'application/json'});res.end(JSON.stringify({error:error instanceof Error?error.message:String(error),code:(error as {code?:string})?.code}));}
  };
 }

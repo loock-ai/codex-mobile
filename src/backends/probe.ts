@@ -4,6 +4,7 @@ import type { BackendConfig } from "./types";
 import { t } from "../i18n";
 
 export interface GatewayHostInfo {
+  backend?: string;
   hostId: string;
   displayName: string;
   hostname: string;

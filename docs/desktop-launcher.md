@@ -46,7 +46,7 @@ ChatGPT 已运行但未开放 CDP 时，可使用「重启并连接」。应用�
 
 ## 支持范围与验收边界
 
-已实现文本输入、可见历史与流式回复、会话切换、停止生成、桌面原文审批选项、审批失效清理、多手机连接与重新连接。手机 UI 继续使用原 React 前端。CDP 模式附件、模型修改、权限修改等未实现功能明确报错或禁用。发送结果未知时不自动重发；审批仅点击具有相同请求身份与原文选项的按钮。
+已实现文本输入、可见历史与流式回复、会话切换、停止生成、桌面原文审批选项、审批失效清理、多手机连接与重新连接。手机 UI 继续使用原 React 前端。旧 DOM CDP 通道仍禁用附件与设置修改；当前结构化 desktop-control 通道支持附件上传、模型与权限显式选择，详见 desktop-control-channel.md。发送结果未知时不自动重发；审批仅点击具有相同请求身份与原文选项的按钮。
 
 当前验证结果：
 
@@ -105,3 +105,21 @@ RUN_CDP_FIXTURE=1 npm test -- tests/server/cdp-live.integration.test.ts
 CDP 模式已从 DOM 桥切为结构化 desktop-control 网关。面板及托盘“启动并打开 Web”会先启动服务，再打开含本机访问口令的网页。列表、历史、文本收发、新建与停止任务通过桌面已有IPC连接；原 app-server 模式保留。新配置默认CDP端口9333，实际配置需与手动启动的桌面一致。
 
 Web 的审批入口处理已收到的请求；当前安装包的AppHost可能接管审批，真实全部审批兼容性尚未验证。不要将受控窗口验证等同于实际账号成功。详见desktop-control-channel.md。
+
+## 通过命令启动并打开 Web
+
+源码环境（已安装依赖并执行 `npm run build:launcher`）：
+
+```bash
+node bin/codex-mobile.mjs launcher --open-web
+```
+
+macOS 打包版本（路径按实际安装位置替换）：
+
+```bash
+open -n "/Users/loock/myFile/codex-launcher/launcher-release/mac-arm64/Codex Mobile Launcher.app" --args --open-web
+```
+
+`-n` 确保 macOS 将参数交给启动器；启动器的单实例机制会把命令转交已运行实例，不创建第二个网关。命令等初始化完成后调用现有连接流程，连接成功才用系统默认浏览器打开带访问口令的 Web 地址。使用保存的模式、端口和口令；不会打印口令，也不会自动确认重启桌面。失败由启动器显示错误，后续命令仍可继续执行。`open` 的退出码只表示已派发，不代表连接成功。
+
+不传 `--open-web` 时仍只显示启动器面板。

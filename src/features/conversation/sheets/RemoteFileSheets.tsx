@@ -3,6 +3,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useContext,
 } from "react";
 import { createPortal } from "react-dom";
 import { AppServerClient } from "../../../app-server/client";
@@ -19,6 +20,8 @@ import { VideoPreviewSheet } from "./VideoPreviewSheet";
 import type { BackendConfig } from "../../../backends/types";
 import { remoteFilePreviewUrl } from "../../../backends/file-upload";
 import videoPoster from "../../../assets/video-poster.svg";
+import {RemoteFileCwdContext} from './RemoteFileContext';
+import {resolveRemotePath} from '../../../ui/remote-path';
 
 function imageMime(source: string) {
   const extension = source.split(/[?#]/)[0]?.split(".").at(-1)?.toLowerCase();
@@ -131,6 +134,7 @@ export function RemoteImage({
   client: AppServerClient | null;
   alt?: string;
 }) {
+  const cwd=useContext(RemoteFileCwdContext);
   const [src, setSrc] = useState(image.local ? "" : image.source);
   const [size, setSize] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
@@ -150,8 +154,10 @@ export function RemoteImage({
     }
     setSrc("");
     if (!client) return;
+    let path:string;
+    try{path=resolveRemotePath(image.source,cwd);}catch{setFailed(true);return;}
     void client
-      .request<{ dataBase64: string }>("fs/readFile", { path: image.source })
+      .request<{ dataBase64: string }>("fs/readFile", { path })
       .then((result) => {
         if (cancelled) return;
         setSize(Math.floor((result.dataBase64.length * 3) / 4));
@@ -163,7 +169,7 @@ export function RemoteImage({
     return () => {
       cancelled = true;
     };
-  }, [client, image.local, image.source]);
+  }, [client, image.local, image.source, cwd]);
 
   if (failed) {
     return <div className="image-load-error">{t("无法读取 {name}", { name: image.name })}</div>;
@@ -462,7 +468,10 @@ export function RemoteFileLink({
   client: AppServerClient | null;
   backend?: BackendConfig | null;
 }) {
-  const target = parseRemoteFileHref(href);
+  const cwd=useContext(RemoteFileCwdContext);
+  let fileHref=href;
+  if(cwd&&!/^[a-z][a-z\d+.-]*:/i.test(href)&&!href.startsWith('#'))try{fileHref=resolveRemotePath(href,cwd);}catch{}
+  const target = parseRemoteFileHref(fileHref);
   const [open, setOpen] = useState(false);
   if (!target) return <a href={href}>{children}</a>;
   return (

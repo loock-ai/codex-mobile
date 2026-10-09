@@ -150,7 +150,7 @@ export async function resumeThreadSession(
       const response=await client.request('thread/resume',{threadId,excludeTurns:true},{timeoutMs:60000});
       if(!isCurrent())throw Object.assign(new Error('会话已切换，恢复请求已取消'),{code:'STALE_RESUME'});
       const page=await loadControlTurns(client,threadId);
-      return {thread:{...response.thread,turns:page.turns},model:response.model,reasoningEffort:response.reasoningEffort,accessMode:'interactive',settingsSynchronized:false,nextTurnsCursor:page.nextCursor};
+      return {thread:{...response.thread,turns:page.turns},model:response.model,reasoningEffort:response.reasoningEffort,approvalPolicy:response.approvalPolicy,approvalsReviewer:response.approvalsReviewer,activePermissionProfile:response.activePermissionProfile,accessMode:'interactive',settingsSynchronized:false,nextTurnsCursor:page.nextCursor};
     }
     const response = await client.request(
       "thread/resume",

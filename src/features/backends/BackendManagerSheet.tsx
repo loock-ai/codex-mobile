@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useState,
+  useRef,
 } from "react";
 import {
   formatBackendGatewayUrl,
@@ -25,7 +26,22 @@ import { ActionSheet } from "../../ui/ActionSheet";
 import { t, useI18n } from "../../i18n";
 import { GatewayQrScannerSheet } from "./GatewayQrScannerSheet";
 
+import {fetchDesktopHosts} from "../../backends/desktop-hosts";
+import {displayedHostIds} from "../../backends/host-selection";
+import type {DesktopHost} from "../../backends/types";
+
+function HostChoices({hosts,selected,onToggle,disabled=false}: {hosts:DesktopHost[];selected:string[];onToggle:(id:string)=>void;disabled?:boolean}) {
+ return <div className="backend-host-choices">{hosts.map(host=>{const name=host.hostId==='local'&&host.displayName!==t("本机")?t("{name}（本机）",{name:host.displayName}):host.displayName;return <label className="backend-host-choice" key={host.hostId}>
+  <span className="backend-host-identity"><strong>{name}</strong><small>{host.hostId}</small></span>
+  <span className="backend-host-toggle">{t("显示")}<input type="checkbox" aria-label={t("显示 {name}",{name})} checked={selected.includes(host.hostId)} disabled={disabled} onChange={()=>onToggle(host.hostId)}/></span>
+ </label>;})}</div>;
+}
+
+function toggleHost(ids:string[],id:string) {return ids.includes(id)?ids.filter(value=>value!==id):[...ids,id];}
+
 interface BackendDraft {
+  desktopHosts?: DesktopHost[];
+  visibleHostIds?: string[];
   remoteProjects?: boolean;
   id: string;
   name: string;
@@ -53,6 +69,7 @@ export function BackendManagerSheet({
   appUpdate,
   probe = defaultProbeBackend,
   scanQrCode,
+  discoverHosts = fetchDesktopHosts,
 }: {
   open: boolean;
   registry: BackendRegistry;
@@ -68,17 +85,24 @@ export function BackendManagerSheet({
   };
   probe?: (backend: BackendConfig) => Promise<GatewayHostInfo>;
   scanQrCode?: () => Promise<string>;
+  discoverHosts?: (backend:BackendConfig)=>Promise<DesktopHost[]|null>;
 }) {
   const { preference, setPreference } = useI18n();
   const [draft, setDraft] = useState<BackendDraft | null>(() =>
     open && !registry.backends.length ? newBackendDraft(0) : null,
   );
   const [testing, setTesting] = useState(false);
+  const [selection,setSelection]=useState<{candidate:BackendConfig;hosts:DesktopHost[];ids:string[]}|null>(null);
+  const attempt=useRef(0);
+  const registryRef=useRef(registry);registryRef.current=registry;
   const [error, setError] = useState("");
   const [qrScannerOpen, setQrScannerOpen] = useState(false);
+  useEffect(()=>()=>{attempt.current++;},[]);
 
   useEffect(() => {
     if (!open) {
+      attempt.current++;
+      setSelection(null);
       setDraft(null);
       setError("");
       setTesting(false);
@@ -143,6 +167,7 @@ export function BackendManagerSheet({
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!draft || testing) return;
+    const sequence=++attempt.current;
     setTesting(true);
     setError("");
     try {
@@ -155,21 +180,32 @@ export function BackendManagerSheet({
         enabled: draft.enabled,
         order: draft.order,
         ...(draft.remoteProjects?{remoteProjects:true}:{}),
+        desktopHosts:draft.desktopHosts,
+        visibleHostIds:draft.visibleHostIds,
       };
       const host = await probe(candidate);
+      if(sequence!==attempt.current)return;
       const hostId = host.hostId.trim();
       if (!hostId) throw new Error(t("设备身份响应无效"));
-      const next = upsertBackend(registry, {
-        ...candidate,
-        hostId,
-        name: candidate.name || host.displayName,
-      });
-      onChange(next);
-      setDraft(null);
+      const tested={...candidate,hostId,name:candidate.name || host.displayName};
+      if(host.backend === "desktop-control") {
+        const hosts=await discoverHosts(tested);
+        if(sequence!==attempt.current)return;
+        if(!hosts)throw new Error(t("此设备暂不支持远程项目"));
+        // 地址变更视为新连接；不把上一台机器的选择套到另一台机器。
+        const previous=registryRef.current.backends.find(b=>b.id===tested.id);
+        const sameGateway=previous?.baseUrl===tested.baseUrl && (!previous?.hostId||previous.hostId===tested.hostId);
+        const ids=displayedHostIds(sameGateway?previous!:{},hosts);
+        setSelection({candidate:tested,hosts,ids:[...ids]});
+      } else {
+        if(sequence!==attempt.current)return;
+        const {desktopHosts:_,visibleHostIds:__,remoteProjects:___,...plain}=tested;
+        onChange(upsertBackend(registryRef.current,plain));setDraft(null);
+      }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if(sequence===attempt.current)setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
-      setTesting(false);
+      if(sequence===attempt.current)setTesting(false);
     }
   };
 
@@ -191,19 +227,31 @@ export function BackendManagerSheet({
   return (
     <>
       <ActionSheet
-        title={draft ? t("设备连接") : t("管理设备")}
-        onClose={onClose}
+        title={selection ? t("选择展示的主机") : draft ? t("设备连接") : t("管理设备")}
+        onClose={()=>{attempt.current++;setSelection(null);onClose();}}
         closeLabel={t("关闭")}
         closeOnBackdrop={false}
         className="backend-manager-sheet"
         backdropClassName="backend-manager-backdrop"
       >
-        {draft ? (
+        {selection ? <div className="backend-host-picker">
+          <p>{t("检测到 {count} 个主机，请选择需要展示的项目和会话。",{count:selection.hosts.length})}</p>
+          <HostChoices hosts={selection.hosts} selected={selection.ids} onToggle={id=>setSelection({...selection,ids:toggleHost(selection.ids,id)})}/>
+          {error && <p className="backend-form-error" role="alert">{error}</p>}
+          <div className="backend-form-actions">
+            <button type="button" className="secondary" onClick={()=>{setSelection(null);setError("");}}>{t("取消")}</button>
+            <button type="button" onClick={()=>{
+              try{onChange(upsertBackend(registryRef.current,{...selection.candidate,remoteProjects:false,desktopHosts:selection.hosts,visibleHostIds:selection.ids}));setSelection(null);setDraft(null);setError("");}
+              catch(reason){setError(reason instanceof Error?reason.message:String(reason));}
+            }}>{t("保存选择")}</button>
+          </div>
+        </div> : draft ? (
           <form className="backend-form" onSubmit={submit}>
             <label>
               <span>{t("设备名称")}</span>
               <input
                 aria-label={t("设备名称")}
+                disabled={testing}
                 value={draft.name}
                 placeholder={t("例如 Mac mini")}
                 onChange={(event) =>
@@ -218,6 +266,7 @@ export function BackendManagerSheet({
                   id="backend-gateway-url"
                   aria-label={t("网关地址")}
                   inputMode="url"
+                  disabled={testing}
                   value={draft.gatewayUrl}
                   placeholder="http://host.local:18766/?token=xxx"
                   onChange={(event) =>
@@ -227,6 +276,7 @@ export function BackendManagerSheet({
                 <button
                   type="button"
                   aria-label={t("扫描网关二维码")}
+                  disabled={testing}
                   onClick={() => void openQrScanner()}
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -236,16 +286,13 @@ export function BackendManagerSheet({
                 </button>
               </div>
             </div>
-            <label style={{display:'flex',alignItems:'center',gap:10}}>
-              <input type="checkbox" style={{width:'auto'}} checked={draft.remoteProjects===true} onChange={event=>setDraft({...draft,remoteProjects:event.target.checked})}/>
-              <span>{t('远程项目')}</span>
-            </label>
             {error && <p className="backend-form-error" role="alert">{error}</p>}
             <div className="backend-form-actions">
               <button
                 type="button"
                 className="secondary"
                 onClick={() => {
+                  attempt.current++;setTesting(false);
                   setDraft(null);
                   setError("");
                 }}
@@ -325,6 +372,8 @@ export function BackendManagerSheet({
                             enabled: backend.enabled,
                             order: backend.order,
                             remoteProjects: backend.remoteProjects,
+                            desktopHosts:backend.desktopHosts,
+                            visibleHostIds:backend.visibleHostIds,
                           });
                           setError("");
                         }}
@@ -357,6 +406,10 @@ export function BackendManagerSheet({
                         {t("删除")}
                       </button>
                     </div>
+                    {backend.desktopHosts && <details className="backend-host-tree" open>
+                      <summary>{t("主机（{count}）",{count:backend.desktopHosts.length})}</summary>
+                      <HostChoices hosts={backend.desktopHosts} selected={displayedHostIds(backend,backend.desktopHosts)} onToggle={id=>updateRegistry(()=>upsertBackend(registry,{...backend,remoteProjects:false,visibleHostIds:toggleHost(displayedHostIds(backend,backend.desktopHosts!),id)}))}/>
+                    </details>}
                   </article>
                 );
               })}
