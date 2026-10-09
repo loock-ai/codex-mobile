@@ -9,11 +9,12 @@ export function validateDotsRequest(request:DesktopHttpRequest){
  // Reject normalized traversal instead of allowing URL parsing to change the target.
  if(url.pathname!==request.path.split('?')[0])throw bad();
  const catalog=url.pathname==='/tbo'||url.pathname==='/tbo/primary';
- const match=/^\/messaging\/rooms\/([^/]+)(\/messages)?$/.exec(url.pathname);
+ const match=/^\/messaging\/rooms\/([^/]+)(\/(?:messages|files))?$/.exec(url.pathname);
  if(!catalog&&!match)throw bad();
  if(match){
   let id:string;try{id=decodeURIComponent(match[1]);}catch{throw bad();}
   if(!isOpaqueId(id)||encodeURIComponent(id)!==match[1])throw bad();
  }
- if(request.method!=='GET'&&!(request.method==='POST'&&match?.[2]==='/messages'&&!url.search))throw new DotsError('DOTS_INVALID_METHOD','不支持的 Dots 操作',400);
+ if(request.method==='GET'&&match?.[2]==='/files')throw bad();
+ if(request.method!=='GET'&&!(request.method==='POST'&&(match?.[2]==='/messages'||match?.[2]==='/files')&&!url.search))throw new DotsError('DOTS_INVALID_METHOD','不支持的 Dots 操作',400);
 }

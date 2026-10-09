@@ -13,6 +13,11 @@ export type LanguagePreference = "system" | Locale;
 const LANGUAGE_STORAGE_KEY = "codex-mobile:language";
 
 const english: Record<string, string> = {
+  "最多选择 4 个附件。": "Select up to 4 attachments.",
+  "每个附件不能超过 20 MiB。": "Each attachment must be 20 MiB or smaller.",
+  "当前设备不支持附件。": "This device does not support attachments.",
+  "选择文件或图片": "Choose files or images",
+  "设备返回了无法读取的附件响应": "The device returned an invalid attachment response",
   "其他回答": "Other answer",
   "Codex 有个问题": "Codex has a question",
   "任务会继续，你可以稍后回答。": "The task continues. You can answer later.",

@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import type { BackendConfig } from '../../backends/types';
 import { ActionSheet } from '../../ui/ActionSheet';
 import { Chevron } from '../../ui/icons';
+import { ImagePreviewSheet } from '../conversation/sheets/ImagePreviewSheet';
 import { MarkdownMessage } from '../../ui/conversation';
-import { createRequestId, dotsRequest, DotsError, mergeMessages, type Dot, type DotMessage, type DotsList, type DotsMessages, type DotsStatus } from './api';
+import { createRequestId, dotsRequest, uploadDotAttachment, DotsError, mergeMessages, type Dot, type DotMessage, type DotsList, type DotsMessages, type DotsStatus } from './api';
 import { t, useI18n } from '../../i18n';
 import './dots.css';
 
@@ -24,6 +25,14 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : t
 
 export function DotsPage({ backends, onBack }: { backends: BackendConfig[]; onBack: () => void }) {
   useI18n();
+  const [viewportHeight, setViewportHeight] = useState(() => window.visualViewport?.height);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const resize = () => setViewportHeight(viewport.height);
+    viewport.addEventListener('resize', resize);
+    return () => viewport.removeEventListener('resize', resize);
+  }, []);
   const devices = backends.filter(backend => backend.enabled && !backend.parentBackendId && !backend.desktopHostId);
   const [selected, setSelected] = useState(devices[0]?.id || '');
   const [identity, setIdentity] = useState<{ backendId: string; key?: string } | null>(null);
@@ -50,7 +59,7 @@ export function DotsPage({ backends, onBack }: { backends: BackendConfig[]; onBa
     <div>{t("请求 ID：")}<code>{receipt.requestId}</code></div>
     {receipt.state !== 'pending' && <button onClick={() => onResolved(receipt.requestId)}>{t("已核对")}</button>}
   </div>)}</div>;
-  return <main className="dots-page">
+  return <main className="dots-page" style={viewportHeight ? { height: `${viewportHeight}px` } : undefined}>
     {backend ? <DeviceDots key={`${backend.id}:${backend.baseUrl}:${backend.token}`} backend={backend} devices={devices} onDeviceChange={setSelected} onBack={onBack} notices={notices} onUnknown={onUnknown} onTrack={onTrack} onResolved={onResolved} onAccountInvalidated={onAccountInvalidated} onIdentity={onIdentity} /> : <>
       <header className="dots-header"><button className="dots-icon-button" aria-label={t('返回 Codex')} onClick={onBack}><Chevron direction="left" /></button><h1>Dots</h1></header>
       {notices}<div className="dots-empty-state"><h2>{t('连接你的设备')}</h2><p>{t('请先在 Codex 中配置并启用设备。')}</p><button className="dots-primary-button" onClick={onBack}>{t('返回 Codex')}</button></div>
@@ -141,7 +150,7 @@ function DeviceDots({ backend, devices, onDeviceChange, onBack, notices, onUnkno
         <div className="dots-empty-actions"><button className="dots-primary-button" onClick={() => void load(cursor || undefined)}>{t('重新加载')}</button><button className="dots-text-button" onClick={() => setPickerOpen(true)}>{t('切换设备')}</button></div>
       </>}
     </div>}
-    {selected && !unavailable && <DotChat key={selected.id} backend={backend} dot={selected} identityKey={status?.identityKey} history={status?.capabilities?.history !== false} onState={setChatState} onName={updateDotName} onUnknown={onUnknown} onTrack={onTrack} onResolved={onResolved} onAccountChanged={accountChanged} />}
+    {selected && !unavailable && <DotChat key={selected.id} backend={backend} dot={selected} identityKey={status?.identityKey} attachments={status?.capabilities?.attachments === true} history={status?.capabilities?.history !== false} onState={setChatState} onName={updateDotName} onUnknown={onUnknown} onTrack={onTrack} onResolved={onResolved} onAccountChanged={accountChanged} />}
     <ActionSheet open={pickerOpen} title={singleDot ? t('选择设备') : t('选择 Dot')} ariaLabel={singleDot ? t('选择设备') : t('选择 Dot')} className="dots-picker" onClose={() => setPickerOpen(false)} showHandle>
       <div className="dots-picker-label">{t('设备')}</div>
       <div className="dots-device-tabs" role="group" aria-label={t('Dots 设备')}>{devices.map(device => <button key={device.id} type="button" aria-pressed={device.id === backend.id} onClick={() => { if (device.id !== backend.id) onDeviceChange(device.id); }}>{device.name}</button>)}</div>
@@ -155,7 +164,7 @@ function DeviceDots({ backend, devices, onDeviceChange, onBack, notices, onUnkno
   </>;
 }
 
-function DotChat({ backend, dot, history, onUnknown, onTrack, onResolved, onAccountChanged, identityKey, onState, onName }: { backend: BackendConfig; onState: (state: ChatState) => void; onName: (id:string,name:string)=>void; dot: Dot; history: boolean; identityKey?: string; onAccountChanged: () => void } & ReceiptActions) {
+function DotChat({ backend, dot, history, attachments, onUnknown, onTrack, onResolved, onAccountChanged, identityKey, onState, onName }: { backend: BackendConfig; onState: (state: ChatState) => void; onName: (id:string,name:string)=>void; dot: Dot; history: boolean; attachments: boolean; identityKey?: string; onAccountChanged: () => void } & ReceiptActions) {
   const [messages, setMessages] = useState<DotMessage[]>([]);
   const currentMessages = useRef<DotMessage[]>([]);
   const [before, setBefore] = useState<string | null>(null);
@@ -165,6 +174,28 @@ function DotChat({ backend, dot, history, onUnknown, onTrack, onResolved, onAcco
   const [sendError, setSendError] = useState('');
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [files, setFiles] = useState<{ id: string; file: File; url?: string }[]>([]);
+  const filesRef = useRef(files);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<{ url: string; name: string } | null>(null);
+  const clearFiles = () => {
+    filesRef.current.forEach(item => { if (item.url) URL.revokeObjectURL(item.url); });
+    filesRef.current = []; setFiles([]); setPreview(null);
+  };
+  useEffect(() => () => { filesRef.current.forEach(item => { if (item.url) URL.revokeObjectURL(item.url); }); }, []);
+  function chooseFiles(selected: File[]) {
+    if (!attachments || sending) return;
+    if (filesRef.current.length + selected.length > 4) { setSendError(t('最多选择 4 个附件。')); return; }
+    if (selected.some(file => file.size > 20 * 1024 * 1024)) { setSendError(t('每个附件不能超过 20 MiB。')); return; }
+    const next = [...filesRef.current, ...selected.map(file => ({ id: createRequestId(), file, url: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined }))];
+    filesRef.current = next; setFiles(next); setSendError('');
+  }
+  function removeFile(id: string) {
+    const item = filesRef.current.find(item => item.id === id);
+    if (item?.url) URL.revokeObjectURL(item.url);
+    if (preview?.url === item?.url) setPreview(null);
+    filesRef.current = filesRef.current.filter(item => item.id !== id); setFiles(filesRef.current);
+  }
   const lifetime = useRef<AbortController | null>(null);
   const reading = useRef(false);
   const writing = useRef(false);
@@ -173,8 +204,8 @@ function DotChat({ backend, dot, history, onUnknown, onTrack, onResolved, onAcco
   const input = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (!input.current) return;
-    input.current.style.height = '24px';
-    input.current.style.height = `${Math.min(input.current.scrollHeight || 24, 120)}px`;
+    input.current.style.height = '44px';
+    input.current.style.height = `${Math.min(input.current.scrollHeight || 44, 120)}px`;
   }, [draft]);
   const read = useCallback(async (older?: string) => {
     if (reading.current || !lifetime.current || document.hidden) return;
@@ -219,20 +250,42 @@ function DotChat({ backend, dot, history, onUnknown, onTrack, onResolved, onAcco
   async function send(event: FormEvent) {
     event.preventDefault();
     const text = draft.trim();
-    if (!text || writing.current || !lifetime.current) return;
+    if ((!text && !files.length) || !ready || writing.current || !lifetime.current) return;
     const signal = lifetime.current.signal;
-    const requestId = createRequestId();
-    if (!onTrack({ requestId, dotName: dot.name, deviceName: backend.name, backendId: backend.id, dotId: dot.id, identityKey, text, state: 'pending' })) {
-      setSendError(t('无法保存待核对记录，本次未发送。请检查浏览器存储。'));
+    const selectedFiles = filesRef.current.slice();
+    writing.current = true; setSending(true); setSendError('');
+    let attachmentIds: string[];
+    try {
+      attachmentIds = [];
+      for (const item of selectedFiles) {
+        const result = await uploadDotAttachment(backend, dot.id, item.file, signal);
+        if (signal.aborted) return;
+        if (!result.attachment?.id) throw new DotsError(t('设备返回了无法读取的附件响应'));
+        attachmentIds.push(result.attachment.id);
+      }
+    } catch (reason) {
+      if (!signal.aborted) {
+        if (reason instanceof DotsError && reason.code === 'DOTS_ACCOUNT_CHANGED') { lifetime.current?.abort(); onAccountChanged(); }
+        else setSendError(errorText(reason));
+      }
+      if (!signal.aborted) { writing.current = false; setSending(false); }
       return;
     }
-    writing.current = true; setSending(true); setSendError('');
+    if (signal.aborted) return;
+    const requestId = createRequestId();
+    const receiptText = [text, ...selectedFiles.map(item => `[${item.file.name}]`)].filter(Boolean).join('\n');
+    if (!onTrack({ requestId, dotName: dot.name, deviceName: backend.name, backendId: backend.id, dotId: dot.id, identityKey, text: receiptText, state: 'pending' })) {
+      setSendError(t('无法保存待核对记录，本次未发送。请检查浏览器存储。'));
+      writing.current = false; setSending(false);
+      return;
+    }
+    writing.current = true; setSending(true);
     try {
-      const result = await dotsRequest<{ message: DotMessage }>(backend, 'send', signal, { dotId: dot.id, text, requestId });
+      const result = await dotsRequest<{ message: DotMessage }>(backend, 'send', signal, { dotId: dot.id, text, requestId, ...(attachmentIds.length ? { attachmentIds } : {}) });
       if (signal.aborted) { onUnknown(requestId); return; }
       onResolved(requestId);
       currentMessages.current = mergeMessages(currentMessages.current, [result.message]);
-      setMessages(currentMessages.current); setDraft('');
+      setMessages(currentMessages.current); setDraft(''); clearFiles();
       requestAnimationFrame(() => { if (!signal.aborted && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight; });
     } catch (reason) {
       if (reason instanceof DotsError && reason.code === 'DOTS_ACCOUNT_CHANGED') {
@@ -243,26 +296,43 @@ function DotChat({ backend, dot, history, onUnknown, onTrack, onResolved, onAcco
       const unknown = !(reason instanceof DotsError) || reason.code === 'DOTS_WRITE_UNKNOWN' || reason.status === 0 || (reason.status >= 500 && !['DOTS_UNAVAILABLE', 'DOTS_LEDGER_FULL', 'DOTS_READ_FAILED', 'DOTS_INVALID_RESPONSE', 'DOTS_PAGINATION_FAILED'].includes(reason.code));
       if (unknown) {
         onUnknown(requestId);
-        if (!signal.aborted) setDraft('');
+        if (!signal.aborted) { setDraft(''); clearFiles(); }
       } else { onResolved(requestId); if (!signal.aborted) setSendError(errorText(reason)); }
     } finally { if (!signal.aborted) { writing.current = false; setSending(false); } }
   }
   return <section className="dots-chat" aria-label={t("{name} 消息", { name: dot.name })}>
     {error && <div className="dots-warning" role="alert">{error}<button disabled={loading} onClick={() => void read()}>{t('重试读取')}</button></div>}
-    <div className="dots-messages" ref={scroll} aria-busy={!ready && loading}>
+    <div className="dots-messages conversation-scroll" ref={scroll} aria-busy={!ready && loading}>
+      <div className="conversation-scroll-content">
       {history && before && <button className="dots-history" disabled={loading} onClick={() => void read(before)}>{t('加载更早消息')}</button>}
       {!ready && loading && <div className="dots-reading" role="status"><span className="dots-loading" aria-hidden="true" />{t('正在读取消息…')}</div>}
       {ready && !messages.some(message => !message.deleted) && <div className="dots-chat-empty"><h2>{t("想聊点什么？")}</h2><p>{t('暂无消息，发送文字开始聊天。')}</p></div>}
-      {messages.filter(message => !message.deleted).map(message => <article className={`dots-message dots-message-${message.role}`} key={message.id} aria-label={message.role === 'user' ? t('你') : message.role === 'system' ? t('系统') : dot.name}>
-        <MarkdownMessage text={message.text} renderImage={(_source, alt) => <span>{t("[图片：{alt}]", { alt: alt || t('请在桌面查看') })}</span>} />
+      {messages.filter(message => !message.deleted).map(message => <article className={`dots-message dots-message-${message.role} ${message.role === 'user' ? 'user-bubble' : message.role === 'assistant' ? 'assistant-message' : 'dots-message-system'}`} key={message.id} aria-label={message.role === 'user' ? t('你') : message.role === 'system' ? t('系统') : dot.name}>
+        <MarkdownMessage className={message.role === 'user' ? 'user-markdown' : undefined} text={message.text} renderImage={(_source, alt) => <span>{t("[图片：{alt}]", { alt: alt || t('请在桌面查看') })}</span>} />
+        {message.attachments?.map(attachment => <div className="dots-attachment-card" key={attachment.id}><span aria-hidden="true">▤</span><span>{attachment.name}</span><small>{Math.ceil(attachment.size / 1024)} KB</small></div>)}
       </article>)}
+      </div>
     </div>
     {sendError && <div role="alert" className="dots-warning">{sendError}</div>}
     <form className="dots-composer" onSubmit={event => void send(event)}>
+      {files.some(item => item.url) && <div className="draft-images" aria-label={t('待发送图片')}>{files.filter(item => item.url).map(item => <figure key={item.id}>
+        <button type="button" className="draft-image-preview" aria-label={t('预览 {name}', { name: item.file.name })} onClick={() => setPreview({ url: item.url!, name: item.file.name })}><img src={item.url} alt={t('待发送 {name}', { name: item.file.name })} /></button>
+        <button type="button" className="draft-image-remove" disabled={sending} aria-label={t('移除 {name}', { name: item.file.name })} onClick={() => removeFile(item.id)}><span aria-hidden="true">×</span></button>
+      </figure>)}</div>}
+      {files.some(item => !item.url) && <div className="draft-files" aria-label={t('待发送文件')}>{files.filter(item => !item.url).map(item => <figure key={item.id}>
+        <div className="draft-file-glyph" aria-hidden="true"><span>{item.file.name.split('.').at(-1)?.slice(0, 5).toUpperCase() || 'FILE'}</span></div><figcaption title={item.file.name}>{item.file.name}</figcaption>
+        <button type="button" className="draft-image-remove" disabled={sending} aria-label={t('移除 {name}', { name: item.file.name })} onClick={() => removeFile(item.id)}><span aria-hidden="true">×</span></button>
+      </figure>)}</div>}
+      {!attachments && <p className="dots-attachment-unavailable">{t('当前设备不支持附件。')}</p>}
+      <div className="composer">
+      <input ref={fileInput} type="file" multiple className="visually-hidden" aria-label={t('选择文件或图片')} disabled={!attachments || sending} onChange={event => { chooseFiles(Array.from(event.target.files || [])); event.target.value = ''; }} />
+      <button type="button" className="add-button" aria-label={t('添加附件')} disabled={!attachments || sending || !ready} onClick={() => fileInput.current?.click()}>＋</button>
       <textarea ref={input} aria-label={t("消息")} placeholder={t("发送消息")} rows={1} value={draft} disabled={sending} onChange={event => setDraft(event.target.value)} />
-      <button className="dots-send-button" type="submit" aria-label={sending ? t('发送中…') : t('发送')} disabled={!ready || !draft.trim() || sending}>
+      <button className="send-button dots-send-button" type="submit" aria-label={sending ? t('发送中…') : t('发送')} disabled={!ready || (!draft.trim() && !files.length) || sending}>
         {sending ? <span className="dots-loading" aria-hidden="true" /> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" /></svg>}
       </button>
+      </div>
     </form>
+    {preview && <ImagePreviewSheet src={preview.url} name={preview.name} onClose={() => setPreview(null)} />}
   </section>;
 }

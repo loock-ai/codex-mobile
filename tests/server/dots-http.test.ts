@@ -9,7 +9,7 @@ afterEach(async()=>{await Promise.all(servers.splice(0).map(server=>new Promise<
 async function fixture(){
   const requests:DesktopHttpRequest[]=[];
   const adapter=new DotsAdapter({status:async()=>({available:true}),close:async()=>{},request:async r=>{
-    requests.push(r);return {status:200,body:r.path.startsWith('/tbo')?{items:[{id:'dot',aeon_kind:'orbit',messaging_room_id:'room'}]}:r.method==='POST'?{id:'sent',account_user_id:'u',content:{text:'hi'}}:{items:[],prev_cursor:null}};
+    requests.push(r);return {status:200,body:r.path.startsWith('/tbo')?{items:[{id:'dot',aeon_kind:'orbit',messaging_room_id:'room'}]}:r.path.endsWith('/files')?{id:'native-file',status:'ready'}:r.method==='POST'?{id:'sent',account_user_id:'u',content:(r.body as any).content}:{items:[],prev_cursor:null}};
   }});
   const handle=createDotsHttp(adapter),server=createServer((req,res)=>{void handle(req,res,new URL(req.url!,'http://localhost'));});servers.push(server);
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));const addr=server.address();if(typeof addr!=='object'||!addr)throw Error('no port');
@@ -23,6 +23,22 @@ describe('Dots HTTP boundary',()=>{
     expect((await (await fetch(`${base}/api/dots/messages?dotId=dot`)).json()).roomId).toBe('room');
     const response=await fetch(`${base}/api/dots/send`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dotId:'dot',text:'hi',requestId:'one'})});
     expect(response.status).toBe(200);expect((await response.json()).message.id).toBe('sent');expect(requests.filter(r=>r.method==='POST')).toHaveLength(1);
+  });
+  it('accepts bounded binary uploads and gateway attachment IDs in send',async()=>{
+    const {base,requests}=await fixture();
+    const response=await fetch(`${base}/api/dots/upload?dotId=dot`,{method:'POST',headers:{'Content-Type':'image/png','x-codex-file-name':encodeURIComponent('图片.png')},body:Buffer.from([0,255,1])});
+    expect(response.status).toBe(200);const {attachment}=await response.json();expect(attachment).toMatchObject({name:'图片.png',type:'image/png',size:3});
+    expect((requests.find(r=>r.path.endsWith('/files'))!.body as any).file.base64).toBe('AP8B');
+    expect((await fetch(`${base}/api/dots/send`,{method:'POST',body:JSON.stringify({dotId:'dot',text:'hi',requestId:'attach',attachmentIds:[attachment.id]})})).status).toBe(200);
+  });
+  it('rejects missing/invalid upload headers, extra query fields and files above 20 MiB',async()=>{
+    const {base,requests}=await fixture();
+    for(const headers of [{},{'Content-Type':'image/png','x-codex-file-name':'%ZZ'},{'Content-Type':'not-a-mime','x-codex-file-name':'image'}] as Record<string,string>[]){
+      expect((await fetch(`${base}/api/dots/upload?dotId=dot`,{method:'POST',headers,body:'x'})).status).toBe(400);
+    }
+    expect((await fetch(`${base}/api/dots/upload?dotId=dot&roomId=room`,{method:'POST',body:'x'})).status).toBe(400);
+    expect((await fetch(`${base}/api/dots/upload?dotId=dot`,{method:'POST',headers:{'Content-Type':'image/png','x-codex-file-name':'image'},body:Buffer.alloc(20*1024*1024+1)})).status).toBe(413);
+    expect(requests).toHaveLength(0);
   });
   it('rejects unknown operations, wrong methods, extra query/body fields and malformed JSON',async()=>{
     const {base,requests}=await fixture();

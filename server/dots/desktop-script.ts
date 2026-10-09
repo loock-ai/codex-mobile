@@ -30,13 +30,26 @@ export const dotsRequestScript = String.raw`async ({request,contract,limit,ident
     'x-openai-web-frontend':'codex_webview','x-openai-codex-window-type':'electron',
    };
    if(request.method==='POST')headers['X-OpenAI-Attach-DeviceCheck-Token']='1';
+   let requestBody=request.body===undefined?undefined:JSON.stringify(request.body);
+   if(request.method==='POST'&&request.path.endsWith('/files')){
+    const file=request.body?.file;
+    if(!file||typeof file.name!=='string'||typeof file.type!=='string'||!/^[-\w.+]+\/[-\w.+]+$/.test(file.type)||typeof file.base64!=='string')throw new Error('Dots invalid upload');
+    const boundary='----codex-upload-'+crypto.randomUUID(),encoder=new TextEncoder();
+    const bytes=Uint8Array.from(atob(file.base64),c=>c.charCodeAt(0));
+    const filename=file.name.replace(/[\r\n"]/g,'')||'upload';
+    const head=encoder.encode('--'+boundary+'\r\nContent-Disposition: form-data; name="file"; filename="'+filename+'"\r\nContent-Type: '+file.type+'\r\n\r\n');
+    const tail=encoder.encode('\r\n--'+boundary+'--\r\n');
+    requestBody=new Uint8Array(head.length+bytes.length+tail.length);requestBody.set(head);requestBody.set(bytes,head.length);requestBody.set(tail,head.length+bytes.length);
+    for(const key of Object.keys(headers))if(key.toLowerCase()==='content-type')delete headers[key];
+    headers['Content-Type']='multipart/form-data; boundary='+boundary;
+   }
    let pending,result,timer,finished=false;
    try{
     const operation=(async()=>{
      const current=await sameAccount();
      if(finished)throw new Error('Dots request no longer active');
      if(!current)return accountChanged;
-     pending=http.fetch(id,{url:request.path,method:request.method,headers,body:request.body===undefined?undefined:JSON.stringify(request.body),retry:'never',returnErrorResponse:true,expectedIdentity:identity});
+     pending=http.fetch(id,{url:request.path,method:request.method,headers,body:requestBody,retry:'never',returnErrorResponse:true,expectedIdentity:identity});
      result=await pending;
      if(finished){result?.[Symbol.dispose]?.();throw new Error('Dots request no longer active');}
      if(!result?.response){

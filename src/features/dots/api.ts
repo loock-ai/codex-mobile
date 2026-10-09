@@ -2,7 +2,8 @@ import { t } from '../../i18n';
 import type { BackendConfig } from '../../backends/types';
 
 export interface Dot { id: string; name: string; roomId?: string | null; paused?: boolean }
-export interface DotMessage { id: string; role: 'user' | 'assistant' | 'system'; text: string; createdAt: string; requestId?: string; deleted?: boolean }
+export interface DotAttachment { id: string; name: string; type: string; size: number }
+export interface DotMessage { attachments?: DotAttachment[]; id: string; role: 'user' | 'assistant' | 'system'; text: string; createdAt: string; requestId?: string; deleted?: boolean }
 export interface DotsStatus { available: boolean; identityKey?: string; error?: string; capabilities?: { messages: boolean; history: boolean; attachments: boolean; approvals: boolean } }
 export interface DotsList { dots: Dot[]; nextCursor: string | null }
 export interface DotsMessages { dotName?: string; messages: DotMessage[]; before: string | null }
@@ -12,7 +13,7 @@ export class DotsError extends Error {
 }
 
 /** Uses exactly the existing gateway token. Every request is bounded and cancellable. */
-export async function dotsRequest<T>(backend: BackendConfig, path: string, signal: AbortSignal, body?: unknown): Promise<T> {
+export async function dotsRequest<T>(backend: BackendConfig, path: string, signal: AbortSignal, body?: unknown, headers?: Record<string, string>): Promise<T> {
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal.addEventListener('abort', abort, { once: true });
@@ -23,7 +24,7 @@ export async function dotsRequest<T>(backend: BackendConfig, path: string, signa
   try {
     const response = await fetch(url.toString(), {
       method: body === undefined ? 'GET' : 'POST', mode: 'cors', signal: controller.signal,
-      ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+      ...(body === undefined ? {} : { headers: headers || { 'Content-Type': 'application/json' }, body: body instanceof File ? body : JSON.stringify(body) }),
     });
     const data = await response.json().catch(() => null) as (T & { error?: string; code?: string }) | null;
     if (!response.ok) throw new DotsError(data?.error || t("设备接口返回 HTTP {status}", { status: response.status }), data?.code || '', response.status);
@@ -55,4 +56,11 @@ export function createRequestId(): string {
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export function uploadDotAttachment(backend: BackendConfig, dotId: string, file: File, signal: AbortSignal): Promise<{ attachment: DotAttachment }> {
+  return dotsRequest(backend, `upload?dotId=${encodeURIComponent(dotId)}`, signal, file, {
+    'Content-Type': file.type || 'application/octet-stream',
+    'x-codex-file-name': encodeURIComponent(file.name),
+  });
 }

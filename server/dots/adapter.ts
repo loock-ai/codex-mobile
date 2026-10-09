@@ -1,3 +1,5 @@
+import {randomUUID} from 'node:crypto';
+import {DOTS_MAX_FILE_BYTES,DOTS_MAX_ATTACHMENTS,type DotAttachment} from './types.js';
 import {isOpaqueId,upstreamId} from './identifiers.js';
 import { DotsError, type DesktopHttpTransport, type DotMessage, type DotProfile } from './types.js';
 
@@ -34,6 +36,14 @@ function contentText(value: unknown): string {
   if (typeof c.text === 'string') return c.text;
   return Array.isArray(c.parts) ? c.parts.flatMap(part => typeof part === 'string' ? [part] : typeof record(part).text === 'string' ? [record(part).text as string] : []).join('\n') : '';
 }
+function contentAttachments(value:unknown):DotAttachment[] {
+ const c=record(value);
+ return (Array.isArray(c.attachments)?c.attachments:[]).flatMap(value=>{
+  const a=record(value),id=upstreamId(a.file_id);
+  if(a.type!=='file'||id===null)return [];
+  return [{id,name:string(a.name)||'附件',type:string(a.mime_type)||'application/octet-stream',size:typeof a.size_bytes==='number'&&Number.isSafeInteger(a.size_bytes)&&a.size_bytes>=0?a.size_bytes:0}];
+ });
+}
 function roomMembers(room: RecordValue): Map<string, RecordValue> {
   const snapshots = new Map<string, RecordValue>();
   for (const value of Array.isArray(room.member_profile_snapshots) ? room.member_profile_snapshots : []) {
@@ -57,6 +67,7 @@ function message(value: unknown, members: ReadonlyMap<string, RecordValue> = new
   const role: DotMessage['role'] = ownReceipt ? 'user' : Array.isArray(m.raw_messages) ? 'assistant' : member ? upstreamId(member.aeon_id)!==null ? 'assistant' : 'user' : 'system';
   const deleted = m.deleted_at != null || m.deleted === true;
   let text = '';
+  let attachments:DotAttachment[]=[];
   if (!deleted) {
     if (ownReceipt) text = contentText(m.content);
     else if (Array.isArray(m.raw_messages)) text = m.raw_messages.flatMap(raw => {
@@ -67,13 +78,16 @@ function message(value: unknown, members: ReadonlyMap<string, RecordValue> = new
       if (record(m.content).type === 'message_error') return null;
       text = contentText(m.content) || string(m.preview) || '';
     }
-    if (!text) return null;
+    attachments=contentAttachments(m.content);
+    if (!text && !attachments.length) return null;
   }
-  return {id,role,text,createdAt:string(m.created_at) ?? '',...(string(m.request_id) ? {requestId:m.request_id as string} : {}),...(deleted ? {deleted:true} : {})};
+  return {id,role,text,createdAt:string(m.created_at) ?? '',...(string(m.request_id) ? {requestId:m.request_id as string} : {}),...(deleted ? {deleted:true} : {}),...(attachments.length?{attachments}:{})};
 }
 
 export class DotsAdapter {
-  private readonly ledger = new Map<string, {dotId:string;text:string;result:Promise<{message:DotMessage}>}>();
+  private readonly ledger = new Map<string, {dotId:string;text:string;attachmentIds:string[];result:Promise<{message:DotMessage}>}>();
+  private readonly uploads=new Map<string,{dotId:string;roomId:string;fileId:string;attachment:DotAttachment}>();
+  private pendingUploads=0;
   private readonly maxRequests: number;
   private lastDiscovery:RecordValue|null=null;
   private lastMessageMapping:RecordValue|null=null;
@@ -84,7 +98,7 @@ export class DotsAdapter {
   }
   async status() {
     const status = await this.transport.status();
-    return {...status,mode:'polling' as const,capabilities:{messages:status.available,history:status.available,attachments:false as const,approvals:false as const}};
+    return {...status,mode:'polling' as const,capabilities:{messages:status.available,history:status.available,attachments:status.available,approvals:false as const}};
   }
   private async read(path: string, requireItems=true): Promise<RecordValue> {
     let response;
@@ -156,24 +170,46 @@ export class DotsAdapter {
     this.lastMessageMapping={at:new Date().toISOString(),received:items.length,members:members.size,dotMembers:dots.length,roles:{user:messages.filter(m=>m.role==='user').length,assistant:messages.filter(m=>m.role==='assistant').length,system:messages.filter(m=>m.role==='system').length}};
     return {roomId,...(dotName ? {dotName} : {}),messages,before:cursor(data.prev_cursor) ?? (data.prev_cursor === null ? null : upstreamId(record(items[0]).id))};
   }
-  async send(input: {dotId:string;text:string;requestId:string}): Promise<{message:DotMessage}> {
+  async upload(input:{dotId:string;name:string;type:string;data:Buffer}):Promise<{attachment:DotAttachment}> {
+    const dotId=identifier(input?.dotId,'Dot ID');
+    if(typeof input.name!=='string'||!input.name.trim()||input.name.length>255||/[\u0000-\u001f\u007f]/.test(input.name)||typeof input.type!=='string'||!/^[-\w.+]+\/[-\w.+]+$/.test(input.type)||!Buffer.isBuffer(input.data)||!input.data.length)throw new DotsError('DOTS_INVALID_INPUT','附件名称、类型或内容无效',400);
+    if(input.data.length>DOTS_MAX_FILE_BYTES)throw new DotsError('DOTS_BODY_TOO_LARGE','附件不能超过 20 MiB',413);
+    if(this.uploads.size+this.pendingUploads>=this.maxRequests)throw new DotsError('DOTS_UPLOAD_FULL','附件记录已满，本次未上传',503);
+    this.pendingUploads++;
+    try{
+    const roomId=await this.room(dotId);
+    let response;
+    try{response=await this.transport.request({method:'POST',path:`/messaging/rooms/${encodeURIComponent(roomId)}/files`,body:{file:{name:input.name,type:input.type,base64:input.data.toString('base64')}}});}
+    catch(error){if(error instanceof DotsError&&['DOTS_ACCOUNT_CHANGED','DOTS_UNAVAILABLE'].includes(error.code))throw error;throw new DotsError('DOTS_UPLOAD_UNKNOWN','附件上传结果未知，本次未发送消息；请核对后再操作');}
+    if(response.status>=400&&response.status<500&&response.status!==408)throw new DotsError('DOTS_UPLOAD_REJECTED',`附件上传被拒绝（${response.status}），本次未发送消息`,response.status);
+    const receipt=record(response.body),fileId=upstreamId(receipt.id);
+    if(response.status<200||response.status>=300||fileId===null||typeof receipt.status!=='string'||['failed','error'].includes(receipt.status))throw new DotsError('DOTS_UPLOAD_UNKNOWN','附件上传结果未知，本次未发送消息；请核对后再操作');
+    const id=randomUUID(),attachment={id,name:input.name,type:input.type,size:input.data.length};
+    this.uploads.set(id,{dotId,roomId,fileId,attachment});
+    return {attachment};
+    }finally{this.pendingUploads--;}
+  }
+  async send(input: {dotId:string;text:string;requestId:string;attachmentIds?:string[]}): Promise<{message:DotMessage}> {
     const dotId = identifier(input?.dotId,'Dot ID'), requestId = identifier(input?.requestId,'请求 ID');
     const text = input.text;
-    if (typeof text !== 'string' || !text.trim() || Buffer.byteLength(text,'utf8') > 60000) throw new DotsError('DOTS_INVALID_INPUT', '消息不能为空且不能超过 60000 字节',400);
+    const attachmentIds=input.attachmentIds===undefined?[]:input.attachmentIds;
+    if(!Array.isArray(attachmentIds)||attachmentIds.length>DOTS_MAX_ATTACHMENTS||new Set(attachmentIds).size!==attachmentIds.length||attachmentIds.some(id=>typeof id!=='string'||this.uploads.get(id)?.dotId!==dotId))throw new DotsError('DOTS_INVALID_INPUT','附件必须来自当前 Dot 的上传回执，最多 4 个',400);
+    if (typeof text !== 'string' || (!text.trim()&&!attachmentIds.length) || Buffer.byteLength(text,'utf8') > 60000) throw new DotsError('DOTS_INVALID_INPUT', '消息不能为空且不能超过 60000 字节',400);
     const existing = this.ledger.get(requestId);
     if (existing) {
-      if (existing.dotId !== dotId || existing.text !== text) throw new DotsError('DOTS_REQUEST_CONFLICT', '同一请求 ID 不能用于不同消息',409);
+      if (existing.dotId !== dotId || existing.text !== text || JSON.stringify(existing.attachmentIds)!==JSON.stringify(attachmentIds)) throw new DotsError('DOTS_REQUEST_CONFLICT', '同一请求 ID 不能用于不同消息',409);
       return existing.result;
     }
     if (this.ledger.size >= this.maxRequests) throw new DotsError('DOTS_LEDGER_FULL', '发送记录已满，请先核对已有投递状态；本次未发送',503);
-    const result = this.submit(dotId,text,requestId);
-    this.ledger.set(requestId,{dotId,text,result});
+    const result = this.submit(dotId,text,requestId,[...attachmentIds]);
+    this.ledger.set(requestId,{dotId,text,attachmentIds:[...attachmentIds],result});
     return result;
   }
-  private async submit(dotId:string,text:string,requestId:string): Promise<{message:DotMessage}> {
+  private async submit(dotId:string,text:string,requestId:string,attachmentIds:string[]): Promise<{message:DotMessage}> {
     const roomId = await this.room(dotId);
+    if(attachmentIds.some(id=>this.uploads.get(id)?.roomId!==roomId))throw new DotsError('DOTS_ROOM_CHANGED','此 Dot 的消息房间已变化，请重新上传附件；本次未发送',400);
     let response;
-    try { response = await this.transport.request({method:'POST',path:`/messaging/rooms/${encodeURIComponent(roomId)}/messages`,body:{content:{text},request_id:requestId,idempotency_token:requestId}}); }
+    try { response = await this.transport.request({method:'POST',path:`/messaging/rooms/${encodeURIComponent(roomId)}/messages`,body:{content:{text,...(attachmentIds.length?{attachments:attachmentIds.map(id=>({type:'file',file_id:this.uploads.get(id)!.fileId}))}:{})},request_id:requestId,idempotency_token:requestId}}); }
     catch (error) {
       // 只有传输明确保证尚未派发的错误可视为安全失败。
       if(error instanceof DotsError && error.code==='DOTS_ACCOUNT_CHANGED')throw error;
@@ -184,6 +220,10 @@ export class DotsAdapter {
     if (response.status < 200 || response.status >= 300) throw new DotsError('DOTS_WRITE_UNKNOWN','消息投递结果未知，请刷新对话核对，不要重复发送');
     const sent = message(response.body, undefined, true);
     if (!sent || (sent.requestId !== undefined && sent.requestId !== requestId)) throw new DotsError('DOTS_WRITE_UNKNOWN','消息已提交但无法确认回执，请刷新对话核对，不要重复发送');
+    if(attachmentIds.length){
+      const expected=attachmentIds.map(id=>this.uploads.get(id)!.fileId).sort(),received=sent.attachments?.map(a=>a.id).sort()??[];
+      if(JSON.stringify(expected)!==JSON.stringify(received))throw new DotsError('DOTS_WRITE_UNKNOWN','消息已提交但无法确认附件回执，请刷新对话核对，不要重复发送');
+      const byId=new Map(attachmentIds.map(id=>{const upload=this.uploads.get(id)!;return [upload.fileId,upload.attachment] as const;}));sent.attachments=sent.attachments?.map(a=>{const own=byId.get(a.id);return own?{...own,id:a.id}:a;});}
     return {message:sent};
   }
   async close() { await this.transport.close(); }

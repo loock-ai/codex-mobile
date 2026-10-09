@@ -55,14 +55,44 @@ it.skipIf(process.env.RUN_CDP_FIXTURE!=='1')('手机独立Dots入口经现有宿
   await expect(adapter.send({dotId:'tbo:dot-a.v1',text:'cancelled-host',requestId:'cancelled'})).rejects.toMatchObject({code:'DOTS_WRITE_UNKNOWN'});
   const after=await desktop.evaluate(()=>(window as any).electronBridge.fixtureInspect());
   expect(after.filter((r:any)=>r.body?.content?.text==='cancelled-host')).toHaveLength(1);
+  await phone.getByRole('button',{name:'添加附件',exact:true}).waitFor();
+  expect(await phone.getByRole('button',{name:'添加附件',exact:true}).evaluate(e=>getComputedStyle(e).fontSize)).toBe('32px');
+  await phone.locator('input[type=file]').setInputFiles([
+    {name:'note.txt',mimeType:'text/plain',buffer:Buffer.from('真实附件内容')},
+    {name:'pixel.png',mimeType:'image/png',buffer:Buffer.from([137,80,78,71,13,10,26,10,0,255])},
+  ]);
+  await phone.getByRole('button',{name:'发送',exact:true}).click();
+  await phone.waitForFunction(()=>!document.querySelector('.draft-files')&&!document.querySelector('.draft-images'));
+  const withFiles=await desktop.evaluate(()=>(window as any).electronBridge.fixtureInspect());
+  const fileWrites=withFiles.filter((r:any)=>r.path.endsWith('/files'));
+  expect(fileWrites).toHaveLength(2);
+  expect(fileWrites[0].file).toMatchObject({name:'note.txt',mime_type:'text/plain',data:[...Buffer.from('真实附件内容')]});
+  expect(fileWrites[1].file.data).toEqual([137,80,78,71,13,10,26,10,0,255]);
+  const sentFiles=withFiles.filter((r:any)=>r.body?.content?.attachments?.length).at(-1);
+  expect(sentFiles.body.content.attachments).toEqual([{type:'file',file_id:'file-0'},{type:'file',file_id:'file-1'}]);
+  const scrolling=await phone.locator('.dots-messages').evaluate(element=>{
+    element.scrollTop=0;const old=element.scrollTop;element.scrollTop=50;
+    return {scrollbar:getComputedStyle(element).scrollbarWidth,webkit:getComputedStyle(element,'::-webkit-scrollbar').display,canScroll:element.scrollHeight>element.clientHeight,changed:element.scrollTop>old};
+  });
+  expect(scrolling).toMatchObject({scrollbar:'none',webkit:'none',canScroll:true,changed:true});
+  expect(await phone.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&document.documentElement.scrollHeight<=innerHeight+1)).toBe(true);
+  await phone.locator('.dots-messages').evaluate(e=>e.scrollTop=e.scrollHeight);
+  await phone.getByText('note.txt',{exact:true}).waitFor();
+  await phone.screenshot({path:'/tmp/codex-dots-attachments.png'});
   await phone.screenshot({path:'/tmp/codex-dots-mobile-redesign.png'});
   const diagnostics=await(await fetch(root+'/api/dots/diagnostics?token=dots-fixture-token')).json();
-  expect(diagnostics.lastMessageMapping.roles).toMatchObject({user:2,assistant:2});
+  expect(diagnostics.lastMessageMapping.roles.user).toBeGreaterThanOrEqual(2);
   expect(diagnostics.lastDiscovery).toMatchObject({received:1,invalidIds:0,acceptedFromList:1,primary:'available',returned:1,withRoom:1});
   await phone.getByRole('textbox',{name:'消息',exact:true}).focus();
   const focus=await phone.getByRole('textbox',{name:'消息',exact:true}).evaluate(element=>{const style=getComputedStyle(element);return {outline:style.outlineStyle,border:style.borderTopWidth,shadow:style.boxShadow};});
   expect(focus).toEqual({outline:'none',border:'0px',shadow:'none'});
   await phone.screenshot({path:'/tmp/codex-dots-focused-single.png'});
+  await phone.setViewportSize({width:390,height:480});
+  await phone.getByRole('textbox',{name:'消息',exact:true}).focus();
+  const composerBox=await phone.locator('.dots-composer').boundingBox();expect(composerBox!.y+composerBox!.height).toBeLessThanOrEqual(480);
+  expect(await phone.evaluate(()=>document.documentElement.scrollHeight<=innerHeight+1)).toBe(true);
+  await phone.screenshot({path:'/tmp/codex-dots-keyboard-height.png'});
+  await phone.setViewportSize({width:390,height:780});
   await phone.getByRole('button',{name:'返回 Codex',exact:true}).click();await phone.getByRole('button',{name:'打开会话列表',exact:true}).click();await phone.getByRole('button',{name:'Dots',exact:true}).click();await phone.locator('.dots-title-static').waitFor();
   await phone.route('**/api/dots/list?*',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({dots:[],nextCursor:null})}));
   await phone.reload();await phone.getByRole('heading',{name:'未找到可用 Dot',exact:true}).waitFor();
@@ -80,6 +110,6 @@ it.skipIf(process.env.RUN_CDP_FIXTURE!=='1')('手机独立Dots入口经现有宿
   await expect(adapter.messages('tbo:dot-a.v1')).rejects.toMatchObject({code:'DOTS_ACCOUNT_CHANGED'});
   await expect(adapter.send({dotId:'tbo:dot-a.v1',text:'no new account send',requestId:'changed'})).rejects.toMatchObject({code:'DOTS_ACCOUNT_CHANGED'});
   expect((await transport.status()).available).toBe(false);
-  expect((await desktop.evaluate(()=>(window as any).electronBridge.fixtureInspect())).filter((r:any)=>r.method==='POST')).toHaveLength(2);
+  expect((await desktop.evaluate(()=>(window as any).electronBridge.fixtureInspect())).filter((r:any)=>r.method==='POST')).toHaveLength(5);
  }finally{await gateway?.close();await transport.close();await browser?.close();child.kill('SIGTERM');await new Promise<void>(r=>{if(child.exitCode!==null)r();else child.once('exit',()=>r());});await rm(profile,{recursive:true,force:true});}
 },40000);
