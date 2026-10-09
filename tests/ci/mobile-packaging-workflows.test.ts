@@ -313,7 +313,7 @@ describe("移动 App 内置前端流水线", () => {
       "Manual npm publishing requires release_version",
     );
     expect(resolveVersion).toContain(
-      "Manual npm publishing requires the next GitHub Release patch version",
+      "Manual npm publishing requires the next unpublished patch version",
     );
     expect(
       spawnSync("bash", ["-n"], {
@@ -328,6 +328,9 @@ describe("移动 App 内置前端流水线", () => {
       const ghStub = join(manualVersionDirectory, "gh");
       writeFileSync(ghStub, "#!/bin/sh\nprintf 'v0.2.16\\n'\n");
       chmodSync(ghStub, 0o755);
+      const npmStub = join(manualVersionDirectory, "npm");
+      writeFileSync(npmStub, "#!/bin/sh\nprintf '[\"0.2.16\"]\\n'\n");
+      chmodSync(npmStub, 0o755);
       const manualVersionEnv = {
         ...process.env,
         ENABLE_IOS_BUILD: "false",
@@ -360,7 +363,7 @@ describe("移动 App 内置前端流水线", () => {
       });
       expect(mismatchedVersion.status).not.toBe(0);
       expect(mismatchedVersion.stderr).toContain(
-        "Manual npm publishing requires the next GitHub Release patch version: 0.2.17",
+        "Manual npm publishing requires the next unpublished patch version: 0.2.17",
       );
 
       const explicitVersion = spawnSync("bash", ["-c", resolveVersion], {

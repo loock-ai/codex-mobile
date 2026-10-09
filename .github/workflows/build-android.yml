@@ -83,6 +83,7 @@ jobs:
             exit 1
           fi
           latest=""
+          npm_versions="[]"
           if [[
             "$GITHUB_EVENT_NAME" == "push" ||
             (
@@ -94,22 +95,30 @@ jobs:
               gh api "repos/${GITHUB_REPOSITORY}/releases/latest" \
                 --jq '.tag_name'
             )"; then
-              if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-                echo "Unable to resolve the latest GitHub Release for manual npm publishing" >&2
-                exit 1
-              fi
-              latest=""
+              echo "Unable to resolve the latest GitHub Release; refusing to guess a release version" >&2
+              exit 1
+            fi
+            if ! npm_versions="$(npm view codex-mobile versions --json --registry=https://registry.npmjs.org)"; then
+              echo "Unable to resolve published npm versions; refusing to guess a release version" >&2
+              exit 1
             fi
           fi
           next_version="$(
-            node - "$latest" "$fallback" <<'NODE'
+            node - "$latest" "$fallback" "$npm_versions" <<'NODE'
           const latest = process.argv[2] || "";
           const fallback = process.argv[3];
-          const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(latest)
-            || /^v?(\d+)\.(\d+)\.(\d+)$/.exec(fallback);
-          if (!match) throw new Error(`Invalid fallback version: ${fallback}`);
-          const patch = Number(match[3]);
-          process.stdout.write(`${match[1]}.${match[2]}.${patch + 1}`);
+          const published = JSON.parse(process.argv[4]);
+          if (!Array.isArray(published) || published.some(version => typeof version !== "string")) {
+            throw new Error("Invalid npm versions response");
+          }
+          const parseStable = version => /^v?(\d+)\.(\d+)\.(\d+)$/.exec(version)?.slice(1).map(Number);
+          const candidates = [latest, fallback, ...published].map(parseStable).filter(Boolean);
+          if (!parseStable(fallback) || (latest && !parseStable(latest))) {
+            throw new Error("Invalid GitHub Release or package version");
+          }
+          candidates.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+          const [major, minor, patch] = candidates.at(-1);
+          process.stdout.write(`${major}.${minor}.${patch + 1}`);
           NODE
           )"
           if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
@@ -128,7 +137,7 @@ jobs:
             "$PUBLISH_NPM_REQUESTED" == "true" &&
             "$version" != "$next_version"
           ]]; then
-            echo "Manual npm publishing requires the next GitHub Release patch version: $next_version" >&2
+            echo "Manual npm publishing requires the next unpublished patch version: $next_version" >&2
             exit 1
           fi
           echo "APP_VERSION=$version" >> "$GITHUB_ENV"
@@ -334,6 +343,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install ImageMagick
         shell: bash
