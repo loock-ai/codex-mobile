@@ -1,7 +1,9 @@
 import {randomUUID} from 'node:crypto';
 import {chromium,type Browser,type Page} from 'playwright-core';
 import {validateCdpUrl} from './dom.js';
-import type {ControlTransport} from './control-channel.js';
+import {ControlError,type ControlTransport,type UserQuestionTarget,type UserQuestionSnapshot} from './control-channel.js';
+import {DESKTOP_APP_HOST_CONTRACT} from './app-host-contract.js';
+import {readUserQuestionsScript,respondUserQuestionScript} from './user-question-script.js';
 
 export function readDesktopHosts(){
  const bridge=(window as any).electronBridge;
@@ -88,6 +90,19 @@ export class CdpControlTransport implements ControlTransport {
  private lose(reason:string){if(this.stopped)return;this.stopped=true;clearInterval(this.timer);this.deliver({type:'control-lost',reason});}
  private async drain(){try{const messages=await this.page!.evaluate(key=>{const state=(window as any)[key];if(!state)throw new Error('监听器已丢失');return state.queue.splice(0);},this.key);for(const m of messages){if(m.type==='control-lost'){this.lose(m.reason);break;}this.deliver(m);}}catch(error){this.lose(String(error));}}
  async send(message:unknown){if(this.stopped||!this.page)throw new Error('桌面传输未连接');await this.page.evaluate(async({key,message})=>{const w=window as any,state=w[key],m=message as any;if(!state||state.lost)throw new Error('监听器不可用');if(m.type==='mcp-request'){for(const [id,expires]of state.requests)if(expires<Date.now())state.requests.delete(id);if(state.requests.size>=2048)throw new Error('等待中的请求过多');state.requests.set(String(m.request.id),Date.now()+120000);}await w.electronBridge.sendMessageFromView(message);},{key:this.key,message});}
+ async readUserQuestions(targets:UserQuestionTarget[]):Promise<UserQuestionSnapshot[]>{
+  if(this.stopped||!this.page)return [];
+  return this.page.evaluate<UserQuestionSnapshot[]>(`(${readUserQuestionsScript})(${JSON.stringify({contract:DESKTOP_APP_HOST_CONTRACT,targets:targets.slice(0,8),timeoutMs:5000})})`);
+ }
+ async respondUserQuestion(hostId:string,request:any,result:unknown){
+  if(this.stopped||!this.page)throw new ControlError('HOST_UNAVAILABLE','桌面问题服务暂不可用，本次未提交');
+  const response=await this.page.evaluate<{status:string}>(`(${respondUserQuestionScript})(${JSON.stringify({contract:DESKTOP_APP_HOST_CONTRACT,hostId,request,result,timeoutMs:8000})})`);
+  if(response.status==='submitted')return;
+  if(response.status==='expired')throw new ControlError('APPROVAL_EXPIRED','问题已处理或已过期');
+  if(response.status==='unavailable')throw new ControlError('HOST_UNAVAILABLE','桌面问题服务暂不可用，本次未提交');
+  if(response.status==='invalid')throw new ControlError('INVALID_PARAMS','回答内容与当前问题不匹配');
+  throw new ControlError('ACTION_WRITE_UNKNOWN','回答已提交但结果未确认，请核对桌面，不要重复提交');
+ }
  async readHosts(){if(this.stopped||!this.page)throw new Error('桌面传输未连接');return this.page.evaluate(readDesktopHosts);}
  async close(){this.stopped=true;clearInterval(this.timer);await this.draining;if(this.page&&!this.page.isClosed())await this.page.evaluate(key=>(window as any)[key]?.dispose(),this.key).catch(()=>{});await this.browser?.close();this.page=null;this.browser=null;this.listeners.clear();}
 }

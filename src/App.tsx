@@ -1,3 +1,4 @@
+import {DotsPage} from "./features/dots/DotsPage";
 import {
   FormEvent,
   useCallback,
@@ -38,7 +39,6 @@ import {
 } from "./app-server/thread-session";
 import {
   activeTurnId,
-  buildTurnSteerParams,
   clearPendingSteerForItem,
   clearPendingSteerForRequest,
   clearPendingSteerForThread,
@@ -55,6 +55,9 @@ import {
   type ConversationLoadState,
 } from "./features/conversation/ConversationPage";
 import { ThreadListPage } from "./features/threads/ThreadListPage";
+import { UserQuestionCard } from "./features/approvals/UserQuestionCard";
+import { selectVisibleRequests, questionRequestKey, buildQuestionAnswers, isUnknownWrite } from "./features/approvals/user-questions";
+import { sendSteeringInput, restoreSteeringDraft } from "./features/conversation/steer-request";
 import { ApprovalSheet } from "./features/approvals/ApprovalSheet";
 import {
   ComposerSettings,
@@ -77,7 +80,7 @@ import {
   type DraftImage,
   type DraftFile,
 } from "./ui/attachments";
-import { uploadFile,uploadConversationAttachments } from "./backends/file-upload";
+import { uploadConversationAttachments } from "./backends/file-upload";
 import {
   effortOptionsForModel,
   defaultNewChatPermissionMode,
@@ -215,6 +218,12 @@ function BackendWorkspace({
   const [requests, setRequests] = useState<RpcMessage[]>([]);
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
   const [approvalError, setApprovalError] = useState("");
+  const [approvalUnknown,setApprovalUnknown] = useState(false);
+  const [approvalSubmitted,setApprovalSubmitted] = useState(false);
+  const requestReplyLocks = useRef(new Map<string,'pending'|'unknown'|'submitted'>());
+  const requestsRef = useRef(requests); requestsRef.current = requests;
+  const currentApprovalKeyRef = useRef('');
+  const steeringRequestRef = useRef(false);
   const [userAnswers, setUserAnswers] = useState<Record<string, string>>({});
   const [models, setModels] = useState<AnyRecord[]>([]);
   const [permissionProfiles, setPermissionProfiles] = useState<AnyRecord[]>([]);
@@ -571,7 +580,14 @@ function BackendWorkspace({
           }
           if (message.method === "desktop/disconnected") { setError(params.reason ?? "桌面控制通道断开"); manager.socket(backend.id)?.close(1011, "desktop disconnected"); }
           if (message.method === "desktop/error") setError(params.message ?? t("桌面操作未确认，请在桌面核对"));
-          if (message.method === "desktop/approval/resolved") setRequests(current => current.filter(request => String(request.id) !== String(params.id)));
+          if (message.method === "desktop/approval/resolved" || message.method === "serverRequest/resolved") {
+            const resolvedId = params.id ?? params.requestId;
+            setRequests(current => current.filter(request => {
+              const matches = String(request.id) === String(resolvedId) && (!params.threadId || (request.params as AnyRecord)?.threadId === params.threadId);
+              if(matches)requestReplyLocks.current.delete(questionRequestKey(request));
+              return !matches;
+            }));
+          }
           if ((message.method === "desktop/thread/changed" || message.method === "desktop/thread/snapshot") && params.thread) {
             activeThreadTargetRef.current = params.threadId;
             setActive(params.thread);
@@ -774,7 +790,11 @@ function BackendWorkspace({
             request.method === "item/permissions/requestApproval" ||
             request.method === "item/tool/requestUserInput"
           ) {
-            setRequests((current) => current.some(entry => entry.id === request.id) ? current : [...current, request]);
+            setRequests((current) => {
+              const existing = current.find(entry => entry.id === request.id);
+              if (!existing) return [...current,request];
+              return JSON.stringify(existing.params) === JSON.stringify(request.params) ? current : current.map(entry => entry.id === request.id ? request : entry);
+            });
           } else if (client.backend === "desktop-control") {
             setError("此请求需要在桌面处理：" + request.method);
           } else {
@@ -1189,7 +1209,9 @@ function BackendWorkspace({
       ? busy
       : startingThreadContext === draftContextGenerationRef.current;
     if (conversationBusy) {
-      if(clientRef.current.backend==='desktop-control'){setError('请等待当前任务完成，或先停止任务');return;}
+      if(clientRef.current.backend==='desktop-cdp'){setError(t('请等待当前任务完成，或先停止任务'));return;}
+      if(steeringRequestRef.current)return;
+      const steeringClient = clientRef.current;
       let sent = false;
       const threadId = String(active?.id ?? "");
       const turnId = activeTurnId(active);
@@ -1208,6 +1230,7 @@ function BackendWorkspace({
       setDraft("");
       setDraftImages([]);
       setDraftFiles([]);
+      steeringRequestRef.current = true;
       setSteering(true);
       setPendingSteerMessage({
         id: clientUserMessageId,
@@ -1216,35 +1239,27 @@ function BackendWorkspace({
       });
       setError("");
       try {
-        setImageReading(Boolean(pendingFiles.length));
-        const uploadedFiles = await Promise.all(
-          pendingFiles.map((file) => uploadFile(backend, file.file)),
-        );
-        await clientRef.current.request(
-          "turn/steer",
-          buildTurnSteerParams({
-            threadId,
-            turnId,
-            input: buildTurnInput(text, pendingImages, uploadedFiles),
-            clientUserMessageId,
-          }),
-        );
+        setImageReading(Boolean(pendingFiles.length || pendingImages.length));
+        await sendSteeringInput({
+          backend, client: steeringClient, threadId, turnId, clientUserMessageId, text,
+          images: pendingImages, files: pendingFiles.map(file => file.file),
+          isCurrent: () => draftContext === draftContextGenerationRef.current && clientRef.current === steeringClient && activeThreadTargetRef.current === threadId,
+        });
         sent = true;
       } catch (reason) {
         setPendingSteerMessage((current) =>
           clearPendingSteerForRequest(current, clientUserMessageId),
         );
         if (draftContext === draftContextGenerationRef.current) {
-          setDraft((current) => mergeSteerDraft(current, text));
-          setDraftImages((current) =>
-            mergeDraftImages(current, pendingImages)
-          );
-          setDraftFiles((current) =>
-            current.length ? current : pendingFiles,
-          );
-          setError(reason instanceof Error ? reason.message : String(reason));
+          if (restoreSteeringDraft(reason)) {
+            setDraft((current) => mergeSteerDraft(current, text));
+            setDraftImages((current) => mergeDraftImages(current, pendingImages));
+            setDraftFiles((current) => current.length ? current : pendingFiles);
+          }
+          setError(isUnknownWrite(reason) ? t('引导消息投递结果未确认，请先核对会话，不要重复发送。') : reason instanceof Error ? reason.message : String(reason));
         }
       } finally {
+        steeringRequestRef.current = false;
         if (draftContext === draftContextGenerationRef.current) {
           setSteering(false);
           setImageReading(false);
@@ -1654,13 +1669,43 @@ function BackendWorkspace({
     if (!active?.id) setNewChatPermissionMode(mode);
     setPicker(null);
   };
-  const approval = requests[0] ?? null;
+  const {approval, question: nonBlockingQuestion} = selectVisibleRequests(requests,String(active?.id ?? ''),backend.desktopHostId ?? 'local');
+  const approvalKey = approval ? questionRequestKey(approval) : '';
+  currentApprovalKeyRef.current = approvalKey;
+  useEffect(() => {
+    setUserAnswers({}); setApprovalSubmitting(requestReplyLocks.current.get(approvalKey) === 'pending'); setApprovalSubmitted(requestReplyLocks.current.get(approvalKey) === 'submitted'); setApprovalError('');
+    setApprovalUnknown(requestReplyLocks.current.get(approvalKey) === 'unknown');
+  }, [approvalKey]);
+  async function respondToRequest(request: RpcMessage, result: unknown) {
+    const key = questionRequestKey(request);
+    const existing = requestReplyLocks.current.get(key);
+    if (existing) throw Object.assign(new Error(t('回答结果未确认，请在桌面核对，不要重复提交。')), {code: existing === 'unknown' ? 'ACTION_WRITE_UNKNOWN' : 'REQUEST_PENDING'});
+    const client = clientRef.current;
+    const threadId = String((request.params as AnyRecord)?.threadId ?? '');
+    if (!client || !requestsRef.current.some(entry => questionRequestKey(entry) === key) || (threadId && threadId !== activeThreadTargetRef.current)) throw new Error(t('问题已失效或会话已切换，请刷新后核对。'));
+    requestReplyLocks.current.set(key,'pending');
+    try {
+      await client.respond(request.id!,result);
+      requestReplyLocks.current.set(key,'submitted');
+      // Desktop pending requests are removed only by the authoritative resolved event/snapshot.
+      if (client.backend !== 'desktop-control') setRequests(current => current.filter(entry => questionRequestKey(entry) !== key));
+    } catch (reason) {
+      if(isUnknownWrite(reason)) requestReplyLocks.current.set(key,'unknown');
+      else requestReplyLocks.current.delete(key);
+      throw reason;
+    }
+  }
   async function submitApproval(result: unknown) {
-    if (!approval || !clientRef.current || approvalSubmitting) return;
-    const id=approval.id!;setApprovalSubmitting(true);setApprovalError("");
-    try { await clientRef.current.respond(id,result); setRequests(current=>current.filter(request=>request.id!==id)); return true; }
-    catch (reason) { setApprovalError(reason instanceof Error?reason.message:String(reason)); return false; }
-    finally { setApprovalSubmitting(false); }
+    if (!approval || approvalSubmitting || approvalUnknown || approvalSubmitted) return;
+    const key = questionRequestKey(approval); setApprovalSubmitting(true); setApprovalError('');
+    try {
+      await respondToRequest(approval,result);
+      if(currentApprovalKeyRef.current === key)setApprovalSubmitted(true);
+      return true;
+    } catch(reason) {
+      if(currentApprovalKeyRef.current === key){setApprovalUnknown(isUnknownWrite(reason));setApprovalError(isUnknownWrite(reason)?t('回答结果未确认，请在桌面核对，不要重复提交。'):reason instanceof Error?reason.message:String(reason));}
+      return false;
+    } finally {if(currentApprovalKeyRef.current === key)setApprovalSubmitting(false);}
   }
   const finishRequest = (decision: "accept" | "decline") => {
     if (!approval) return;
@@ -1681,14 +1726,7 @@ function BackendWorkspace({
 
   };
   const answerQuestions = () => {
-    if (!approval) return;
-    const questions = ((approval.params as AnyRecord)?.questions ?? []) as AnyRecord[];
-    void submitApproval({
-      answers: Object.fromEntries(
-        questions.map((question) => [question.id, { answers: [userAnswers[question.id] ?? ""] }]),
-      ),
-    }).then(success=>{if(success)setUserAnswers({});});
-
+    if (approval) void submitApproval(buildQuestionAnswers(approval,userAnswers));
   };
 
   const startNewChat = (
@@ -1840,6 +1878,7 @@ function BackendWorkspace({
           busy={conversationBusy}
           steering={steering}
           steerable={Boolean(activeTurnId(active))}
+          questionCard={nonBlockingQuestion ? <UserQuestionCard request={nonBlockingQuestion} submissionState={requestReplyLocks.current.get(questionRequestKey(nonBlockingQuestion))} onSubmit={result => respondToRequest(nonBlockingQuestion,result)} /> : null}
           pendingSteerText={
             pendingSteerMessage?.threadId === String(active.id)
               ? pendingSteerMessage.text
@@ -1916,8 +1955,9 @@ function BackendWorkspace({
         onDesktopChoice={(choice) => {
           if (approval) void submitApproval({ desktopChoice: choice });
         }}
-        submitting={approvalSubmitting}
-        submissionError={approvalError}
+        submitting={approvalSubmitting || approvalSubmitted}
+        submissionUnknown={approvalUnknown}
+        submissionError={approvalError || (approvalSubmitted ? t("回答已提交，等待桌面同步。") : "")}
         approval={approval}
         userAnswers={userAnswers}
         onAnswerChange={(questionId, value) =>
@@ -1966,7 +2006,17 @@ export function App() {
     }
     return initial;
   });
-  return <AppBootstrap initialRegistry={initialRegistry} />;
+  const [dotsOpen,setDotsOpen]=useState(()=>window.location.hash==="#dots");
+  const [dotsBackends,setDotsBackends]=useState(initialRegistry.backends);
+  useEffect(()=>{
+    const changed=()=>{
+      setDotsOpen(window.location.hash==="#dots");
+      setDotsBackends(loadBackendRegistry(window.localStorage,window.location.origin,new URLSearchParams(window.location.search).get("token")??"").backends);
+    };
+    window.addEventListener("hashchange",changed);return()=>window.removeEventListener("hashchange",changed);
+  },[]);
+  return <><div hidden={dotsOpen}><AppBootstrap initialRegistry={initialRegistry}/></div>
+    {dotsOpen&&<DotsPage backends={dotsBackends} onBack={()=>{window.location.hash="";setDotsOpen(false);}}/>}</>;
 }
 
 export function AppBootstrap({
@@ -2458,7 +2508,7 @@ function ConfiguredApp({
   );
 
   if (!selectedBackend) {
-    return <main className="app-shell"><div className="empty-state"><p>{t("没有展示的主机，请在设备管理中开启。")}</p><button type="button" onClick={()=>setManagerOpen(true)}>{t("管理设备")}</button></div>
+    return <main className="app-shell"><div className="empty-state"><p>{t("没有展示的主机，请在设备管理中开启。")}</p><button type="button" onClick={()=>{window.location.hash="dots";}}>Dots</button><button type="button" onClick={()=>setManagerOpen(true)}>{t("管理设备")}</button></div>
       <BackendManagerSheet open={managerOpen} registry={registry} summaries={summaries} onChange={persistRegistry} onClose={()=>setManagerOpen(false)}/>
     </main>;
   }

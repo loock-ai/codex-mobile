@@ -62,3 +62,25 @@ it('后台发送不能改变客户端明确选择的会话订阅',async()=>{
  try{await client.connect();client.subscribe(e=>events.push(e));await client.request('desktop/subscribe',{threadIds:['b']});await client.request('turn/start',{threadId:'a',input:[{type:'text',text:'background'}]});transport.listener({type:'mcp-notification',hostId:'local',method:'item/agentMessage/delta',params:{threadId:'a',delta:'must not deliver'}});await new Promise(r=>setTimeout(r,20));expect(events).toHaveLength(0);}
  finally{client.close();await gateway.close();}
 });
+it('明确订阅才补读问题，合并去重并限制8个目标，取消订阅后停止',async()=>{
+ class Questions extends Transport {reads:any[][]=[];async readUserQuestions(targets:any[]){this.reads.push(targets);return targets.map(t=>({...t,requests:[{id:`q-${t.threadId}`,method:'item/tool/requestUserInput',params:{threadId:t.threadId,questions:[]}}]}));}async respondUserQuestion(){} }
+ const transport=new Questions(),gateway=await createControlGateway({channel:new DesktopControlChannel(transport),host:'127.0.0.1',port:0,token:'fixture-token'});
+ const client=new DesktopControlClient(`ws://127.0.0.1:${gateway.port}/ws?token=fixture-token`),events:any[]=[];
+ try{await client.connect();client.subscribe(e=>events.push(e));expect(transport.reads).toHaveLength(0);
+  await client.request('desktop/subscribe',{threadIds:null});await new Promise(r=>setTimeout(r,20));expect(transport.reads).toHaveLength(0);
+  await client.request('desktop/subscribe',{threadIds:['a','a',...Array.from({length:12},(_,i)=>`t${i}`)]});
+  await expect.poll(()=>events.filter(e=>e.method==='item/tool/requestUserInput').length).toBe(8);
+  expect(transport.reads[0]).toHaveLength(8);expect(transport.reads[0][0]).toEqual({hostId:'local',threadId:'a'});
+  await client.request('desktop/unsubscribe',{});const reads=transport.reads.length;await new Promise(r=>setTimeout(r,1600));expect(transport.reads).toHaveLength(reads);
+ }finally{client.close();await gateway.close();}
+});
+it('补读不重叠且取消订阅阻止迟到问题重新出现',async()=>{
+ class Questions extends Transport {reads=0;finish!:(snapshots:any[])=>void;async readUserQuestions(_targets:any[]){this.reads++;return new Promise<any[]>(resolve=>{this.finish=resolve;});}async respondUserQuestion(){} }
+ const transport=new Questions(),channel=new DesktopControlChannel(transport),gateway=await createControlGateway({channel,host:'127.0.0.1',port:0,token:'fixture-token'});
+ const client=new DesktopControlClient(`ws://127.0.0.1:${gateway.port}/ws?token=fixture-token`),events:any[]=[];
+ try{await client.connect();client.subscribe(e=>events.push(e));await client.request('desktop/subscribe',{threadIds:['a']});await expect.poll(()=>transport.reads).toBe(1);
+  await new Promise(r=>setTimeout(r,1600));expect(transport.reads).toBe(1);
+  await client.request('desktop/unsubscribe',{});transport.finish([{hostId:'local',threadId:'a',requests:[{id:1,method:'item/tool/requestUserInput',params:{threadId:'a',questions:[]}}]}]);
+  await new Promise(r=>setTimeout(r,20));expect(events).toHaveLength(0);expect(channel.pendingApprovals()).toHaveLength(0);
+ }finally{client.close();await gateway.close();}
+});

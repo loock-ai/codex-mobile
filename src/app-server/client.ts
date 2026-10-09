@@ -72,7 +72,7 @@ export class AppServerClient {
     options: AppServerRequestOptions = {},
   ): Promise<T> {
     const id = this.nextId++;
-    const write=this.backend==='desktop-control'&&['thread/start','thread/resume','turn/start','turn/interrupt','desktop/approval/respond'].includes(method);
+    const write=this.backend==='desktop-control'&&['thread/start','thread/resume','turn/start','turn/steer','turn/interrupt','desktop/approval/respond'].includes(method);
     return new Promise<T>((resolve, reject) => {
       if (this.socket.readyState !== WebSocket.OPEN) {
         reject(new Error(t("与 app-server 的连接不可用")));

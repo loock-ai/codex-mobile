@@ -1,0 +1,2 @@
+const {contextBridge,ipcRenderer}=require('electron');
+contextBridge.exposeInMainWorld('electronBridge',{getSentryInitOptions:()=>({appVersion:'26.1002.52244'}),fixtureHoldIdentity:()=>ipcRenderer.invoke("dots-fixture-hold-identity"),fixtureReleaseIdentity:()=>ipcRenderer.invoke("dots-fixture-release-identity"),fixtureIdentity:()=>ipcRenderer.invoke("dots-fixture-identity"),fixtureSwitchIdentity:()=>ipcRenderer.invoke("dots-fixture-switch-identity"),fixtureFetch:r=>ipcRenderer.invoke('dots-fixture-request',r),fixtureInspect:()=>ipcRenderer.invoke('dots-fixture-inspect')});

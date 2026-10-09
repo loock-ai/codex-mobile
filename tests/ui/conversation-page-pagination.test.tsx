@@ -8,6 +8,7 @@ function renderConversation(
   olderTurnsState: "idle" | "loading" | "error" | "exhausted",
   onLoadOlderTurns = vi.fn().mockResolvedValue(true),
   composer: {
+    clientBackend?: "desktop-control" | "desktop-cdp";
     draft?: string;
     busy?: boolean;
     steering?: boolean;
@@ -38,7 +39,7 @@ function renderConversation(
       loadError=""
       olderTurnsState={olderTurnsState}
       connection="online"
-      client={null}
+      client={composer.clientBackend ? {backend:composer.clientBackend,onNotification:()=>()=>{}} as any : null}
       error=""
       draft={composer.draft ?? ""}
       draftImages={composer.draftImages ?? []}
@@ -329,4 +330,13 @@ describe("会话详情历史分页", () => {
     expect(view.getByText("PDF")).not.toBeNull();
     expect(view.getByRole("button", { name: "移除 需求.pdf" })).not.toBeNull();
   });
+});
+
+
+it('结构化桌面运行中可引导，旧桌面通道仍只提供停止', () => {
+  const controlled = renderConversation('exhausted', undefined, { clientBackend: 'desktop-control', busy: true, draft: '先跑测试' });
+  expect(within(controlled.container).getByRole('button', { name: '引导' })).not.toBeNull();
+  controlled.unmount();
+  const legacy = renderConversation('exhausted', undefined, { clientBackend: 'desktop-cdp', busy: true, draft: '先跑测试' });
+  expect(within(legacy.container).queryByRole('button', { name: '引导' })).toBeNull();
 });

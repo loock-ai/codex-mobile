@@ -1,15 +1,30 @@
 import {createServer} from 'node:http';
 import WebSocket,{WebSocketServer} from 'ws';
 import {assertGatewaySecurity} from '../app-server-manager.js';
-import {ControlError,type DesktopControlChannel,type ControlEvent} from './control-channel.js';
+import {ControlError,type DesktopControlChannel,type ControlEvent,type UserQuestionTarget} from './control-channel.js';
 import {controlHttp} from './control-http.js';
+import type {DotsAdapter} from '../dots/adapter.js';
 
 export interface ControlGatewayStatus {clients:number;approvals:number;connected:boolean;error:string}
-export async function createControlGateway(options:{channel:DesktopControlChannel;host:string;port:number;token:string;staticDir?:string;onStatus?:(status:ControlGatewayStatus)=>void}){
+export async function createControlGateway(options:{channel:DesktopControlChannel;host:string;port:number;token:string;staticDir?:string;dots?:DotsAdapter;onStatus?:(status:ControlGatewayStatus)=>void}){
  assertGatewaySecurity(options.host,options.token);if(!options.token)throw new Error('控制通道必须配置访问口令');
  await options.channel.connect();
  const clients=new Map<WebSocket,{initialized:boolean;active:boolean;hostId:string;threads:Set<string>|null;delivered:Set<string|number>}>();
- let error='';
+ let error='',closed=false,refreshing=false,refreshAgain=false;
+ const questionTargets=()=>{
+  const targets=new Map<string,UserQuestionTarget>();
+  for(const state of clients.values())if(state.initialized&&state.active&&state.threads!==null)for(const threadId of state.threads){if(!threadId)continue;const key=JSON.stringify([state.hostId,threadId]);if(targets.size<8)targets.set(key,{hostId:state.hostId,threadId});}
+  return [...targets.values()];
+ };
+ const refreshQuestions=async(urgent=false):Promise<void>=>{
+  const targets=questionTargets();options.channel.setUserQuestionTargets(targets);
+  if(closed)return;
+  if(refreshing){if(urgent)refreshAgain=true;return;}
+  refreshing=true;
+  try{await options.channel.refreshUserQuestions(targets);}catch{/* 暂时不可用不撤销已有问题 */}
+  finally{refreshing=false;if(refreshAgain&&!closed){refreshAgain=false;void refreshQuestions();}}
+ };
+ let questionTimer:ReturnType<typeof setInterval>|undefined;
  const statusChanged=()=>options.onStatus?.({clients:clients.size,approvals:options.channel.pendingApprovals().length,connected:options.channel.status().connected,error});
  const send=(socket:WebSocket,message:unknown)=>{if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify(message));};
  const authorized=(url:URL)=>url.searchParams.get('token')===options.token;
@@ -20,7 +35,7 @@ export async function createControlGateway(options:{channel:DesktopControlChanne
  const unsubscribe=options.channel.subscribe(event=>{if(event.method==='desktop/disconnected')error=event.params?.reason??'桌面连接中断';statusChanged();for(const [socket,state]of clients){if(!state.initialized||!matches(state,event))continue;if(event.id!==undefined)state.delivered.add(event.id);if(event.method==='desktop/approval/resolved')state.delivered.delete(event.params.id);send(socket,event);}});
  wss.on('connection',socket=>{
   const state={initialized:false,active:false,hostId:'local',threads:new Set<string>() as Set<string>|null,delivered:new Set<string|number>()};clients.set(socket,state);statusChanged();
-  socket.on('close',()=>{clients.delete(socket);statusChanged();});socket.on('error',()=>{});
+  socket.on('close',()=>{clients.delete(socket);void refreshQuestions(true);statusChanged();});socket.on('error',()=>{});
   socket.on('message',async raw=>{
    let message:any;try{message=JSON.parse(String(raw));}catch{send(socket,{error:{code:-32700,message:'无效 JSON'}});return;}
    if(!message||typeof message!=='object'||Array.isArray(message)){send(socket,{error:{code:-32600,message:'无效请求'}});return;}
@@ -34,14 +49,14 @@ export async function createControlGateway(options:{channel:DesktopControlChanne
      if(state.initialized)throw new ControlError('ALREADY_INITIALIZED','连接已初始化');
      if(p.hostId!==undefined&&(typeof p.hostId!=='string'||!p.hostId))throw new ControlError('INVALID_PARAMS','hostId 必须是非空字符串');
      if(p.hostId&&p.hostId!=='local'&&!(await options.channel.hosts()).some(host=>host.hostId===p.hostId))throw new ControlError('HOST_UNAVAILABLE','桌面没有该远程主机');
-     state.hostId=p.hostId??'local';state.initialized=true;reply({userAgent:'codex-mobile-desktop-control',backend:'desktop-control',...options.channel.status()});return;
+     state.hostId=p.hostId??'local';state.initialized=true;reply({userAgent:'codex-mobile-desktop-control',backend:'desktop-control',...options.channel.status(),capabilities:{...options.channel.status().capabilities,dots:!!options.dots}});void refreshQuestions(true);return;
     }
-    if(message.method==='desktop/status'){reply(options.channel.status());return;}
+    if(message.method==='desktop/status'){reply({...options.channel.status(),capabilities:{...options.channel.status().capabilities,dots:!!options.dots}});return;}
     if(message.method==='desktop/subscribe'){
      if(p.threadIds!==null&&(!Array.isArray(p.threadIds)||p.threadIds.some((id:unknown)=>typeof id!=='string')))throw new ControlError('INVALID_PARAMS','threadIds 必须是字符串数组，或 null 表示全部');
-     state.active=true;state.delivered.clear();state.threads=p.threadIds===null?null:new Set(p.threadIds);reply({subscribed:true});for(const event of options.channel.pendingApprovals())if(matches(state,event)){state.delivered.add(event.id!);send(socket,event);}return;
+     state.active=true;state.delivered.clear();state.threads=p.threadIds===null?null:new Set(p.threadIds);reply({subscribed:true});for(const event of options.channel.pendingApprovals())if(matches(state,event)){state.delivered.add(event.id!);send(socket,event);}void refreshQuestions(true);return;
     }
-    if(message.method==='desktop/unsubscribe'){state.active=false;state.threads=new Set();state.delivered.clear();reply({});return;}
+    if(message.method==='desktop/unsubscribe'){state.active=false;state.threads=new Set();state.delivered.clear();void refreshQuestions(true);reply({});return;}
     if(message.method==='desktop/approval/respond'||!message.method){
      const id=message.method?p.approvalId:message.id,result=message.method?p.result:message.result;
      if(!state.delivered.has(id))throw new ControlError('APPROVAL_EXPIRED','当前客户端没有该审批');
@@ -54,7 +69,7 @@ export async function createControlGateway(options:{channel:DesktopControlChanne
   });
  });
  try{await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(options.port,options.host,()=>{server.off('error',reject);resolve();});});}catch(e){unsubscribe();await options.channel.close();throw e;}
- let closed=false;
+ questionTimer=setInterval(()=>{void refreshQuestions();},1500);questionTimer.unref();
  statusChanged();
- return {port:(server.address() as {port:number}).port,channel:options.channel,async close(){if(closed)return;closed=true;unsubscribe();for(const socket of clients.keys())socket.terminate();await new Promise<void>(resolve=>wss.close(()=>resolve()));await new Promise<void>(resolve=>server.close(()=>resolve()));await options.channel.close();statusChanged();}};
+ return {port:(server.address() as {port:number}).port,channel:options.channel,async close(){if(closed)return;closed=true;clearInterval(questionTimer);options.channel.setUserQuestionTargets([]);unsubscribe();for(const socket of clients.keys())socket.terminate();await new Promise<void>(resolve=>wss.close(()=>resolve()));await new Promise<void>(resolve=>server.close(()=>resolve()));await options.channel.close();await options.dots?.close();statusChanged();}};
 }

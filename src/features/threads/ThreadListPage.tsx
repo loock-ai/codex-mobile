@@ -150,6 +150,7 @@ export function ThreadListPage({
             </p>
           </div>
           <div className="list-header-actions">
+            <button type="button" className="round-button" aria-label="Dots" onClick={()=>{window.location.hash="dots";}}>Dots</button>
             <button
               className={`round-button${refreshing ? " refreshing" : ""}`}
               aria-label={t("刷新会话列表")}

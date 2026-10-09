@@ -1,3 +1,5 @@
+import {DotsAdapter} from '../dots/adapter.js';
+import {CdpDesktopHttpTransport} from '../dots/desktop-transport.js';
 import { EventEmitter } from 'node:events';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -59,7 +61,7 @@ export class LauncherController extends EventEmitter {
    else if(this.config.mode==='cdp'){
     if(!await this.debugReady()){if(await this.desktopRunning())throw new Error('ChatGPT 正在运行但未开启 CDP，请点击重启并连接');await this.launchDebugDesktop();await this.waitDebug();}
     const channel=new DesktopControlChannel(new CdpControlTransport(`http://127.0.0.1:${this.config.cdpPort}`));
-    try{this.service=await createControlGateway({host:this.config.host,port:this.config.gatewayPort,token:this.config.token,staticDir:join(this.packageRoot,'dist'),channel,onStatus:s=>{this.clients=s.clients;this.approvals=s.approvals;this.error=s.error;if(!s.connected&&s.error)this.phase='桌面连接中断';this.changed();}});}catch(e){await channel.close();throw e;}
+    try{this.service=await createControlGateway({host:this.config.host,port:this.config.gatewayPort,token:this.config.token,staticDir:join(this.packageRoot,'dist'),channel,dots:new DotsAdapter(new CdpDesktopHttpTransport(`http://127.0.0.1:${this.config.cdpPort}`)),onStatus:s=>{this.clients=s.clients;this.approvals=s.approvals;this.error=s.error;if(!s.connected&&s.error)this.phase='桌面连接中断';this.changed();}});}catch(e){await channel.close();throw e;}
    }else{
     const managed=this.config.mode==='managed'?await startManagedAppServer(this.config.appServerPort,discoverDesktopCli(this.config.appPath)):null;
     const upstream=this.config.mode==='external'?this.config.upstreamUrl:`ws://127.0.0.1:${this.config.appServerPort}`;

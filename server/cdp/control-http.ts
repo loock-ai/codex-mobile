@@ -5,15 +5,22 @@ import {hostname} from 'node:os';
 import {readComputerName} from '../computer-name.js';
 import type {DesktopControlChannel} from './control-channel.js';
 import {uploadToDesktop} from './control-upload.js';
+import type {DotsAdapter} from '../dots/adapter.js';
+import {createDotsHttp} from '../dots/http.js';
 
-export function controlHttp(options:{channel:DesktopControlChannel;token:string;staticDir?:string}){
+export function controlHttp(options:{channel:DesktopControlChannel;token:string;staticDir?:string;dots?:DotsAdapter}){
  const computerName=readComputerName();
+ const dotsHttp=options.dots?createDotsHttp(options.dots):null;
  return async(req:IncomingMessage,res:ServerResponse)=>{
   try{
    const url=new URL(req.url??'/','http://localhost'),api=url.pathname.startsWith('/api/'),authorized=url.searchParams.get('token')===options.token;
    if(api&&authorized&&req.headers.origin){res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin');res.setHeader('Access-Control-Allow-Methods','GET, POST, OPTIONS');res.setHeader('Access-Control-Allow-Headers','content-type,x-codex-file-name');res.setHeader('Access-Control-Allow-Credentials','true');}
    if(req.method==='OPTIONS'){res.writeHead(authorized?204:401);res.end();return;}
    if(api&&!authorized){res.writeHead(401);res.end();return;}
+   if(url.pathname.startsWith('/api/dots/')){
+    if(!dotsHttp){res.writeHead(503,{'content-type':'application/json'});res.end(JSON.stringify({error:'此连接尚未启用 Dots 适配',code:'DOTS_UNAVAILABLE'}));return;}
+    const requestUrl=new URL(url);requestUrl.searchParams.delete('token');await dotsHttp(req,res,requestUrl);return;
+   }
    if(req.method!=='GET'&&!(req.method==='POST'&&url.pathname==='/api/uploads/file')){res.writeHead(405);res.end();return;}
    if(api){
     res.setHeader('content-type','application/json; charset=utf-8');
@@ -21,7 +28,7 @@ export function controlHttp(options:{channel:DesktopControlChannel;token:string;
     const remote=hostId==='local'?null:(await options.channel.hosts()).find(host=>host.hostId===hostId);
     if(hostId!=='local'&&!remote){res.writeHead(404);res.end(JSON.stringify({error:'桌面没有该远程主机'}));return;}
     if(url.pathname==='/api/uploads/file'){await uploadToDesktop(req,res,options.channel,hostId);return;}
-    if(url.pathname==='/api/status')res.end(JSON.stringify(options.channel.status()));
+    if(url.pathname==='/api/status')res.end(JSON.stringify({...options.channel.status(),capabilities:{...options.channel.status().capabilities,dots:!!options.dots}}));
     else if(url.pathname==='/api/desktop/hosts'){const name=await computerName;res.end(JSON.stringify({data:(await options.channel.hosts()).map(host=>host.hostId==='local'?{...host,displayName:name}:host)}));}
     else if(url.pathname==='/api/host')res.end(JSON.stringify({hostId:hostname()+'-desktop-control'+(remote?':'+hostId:''),displayName:remote?.displayName??await computerName,hostname:hostname(),gatewayVersion:'0.2.0',appServerReady:options.channel.status().connected,backend:'desktop-control'}));
     else if(url.pathname==='/api/projects'){

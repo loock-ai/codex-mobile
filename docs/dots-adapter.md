@@ -1,0 +1,56 @@
+# Dots 手机适配
+
+Dots 使用独立的业务适配和手机页面，入口在会话列表右上角 `Dots`，也可使用现有网关链接的 `#dots` 页面。返回 Codex 时保留原页面和草稿。
+
+## 当前范围
+
+- Dot 列表分页、消息历史分页、文字发送；自动打开首个可用 Dot，设备与 Dot 选择收在顶部菜单。
+- 兼容旧 TBO 缺少 aeon_kind 的房间记录，并通过官方 /tbo/primary 获取主 Dot，避免把已存在的主 Dot 过滤成空列表。
+- 前台每 3 秒读取最新消息，后台暂停；长时间离开产生消息缺口时重置到可连续分页的新窗口。
+- 使用已保存的设备连接和网关口令；不会向手机返回桌面登录凭据。
+- 未确认发送先保存在手机本地，含请求编号和文字，成功或明确拒绝后清除。结果未知时提示核对，不自动重发；用户可点击“已核对”清除。
+- 暂不支持附件上传、语音、暂停 Dot、创建 Dot，以及复杂交互确认或审批。需要这些操作时使用官方客户端。
+
+## 通道
+
+`DotsPage → /api/dots/* → DotsAdapter → CdpDesktopHttpTransport → 桌面既有 AppHost.httpFetch → Dots 消息接口`。
+
+复用桌面已加载模块中的 AppHost services；不调用第二次 `connect-app-host`，不覆盖原窗口注册。宿主负责账户鉴权、工作区路由、设备证明和网络策略。只开放以下网关路由：
+
+| 路由 | 用途 |
+| --- | --- |
+| GET /api/dots/diagnostics | 仅返回最近发现的结构计数，不触发上游请求、不含内容或凭据 |
+| GET /api/dots/status | 通道可用性、功能范围与匿名身份指纹 |
+| GET /api/dots/list?cursor=… | Dot 列表 |
+| GET /api/dots/messages?dotId=…&before=… | 已有 Dot 的消息 |
+| POST /api/dots/send | dotId、text、requestId |
+
+网关完成口令校验后才分发，拒绝任意上游 URL、headers、cookies 和未知字段。Dots 与 Codex RPC 有不同的身份、分页和错误处理。
+
+## 兼容与身份
+
+当前仅固定适配已静态核对的桌面版本 `26.1002.52244`，对应 `app-shared-6c00c2afcf84.js` 的既有 services 导出。其他版本明确返回尚未支持，不能静默猜测接口。
+
+通过宿主 `accessInputs.readAccountInfo(true)` 读取非凭据身份，HTTP 请求带预期身份，前后核对同一账户和用户。通道首次绑定身份后不自动换账号：桌面切换账号/工作区须重启启动器，再重新连接 Dots。手机收到账号变化会清理旧列表和聊天；跨身份待核对记录不展示旧消息正文。
+
+需要已登录且已创建 Dot。未初始化的消息房间应先在官方客户端打开，适配层不会替用户创建房间或 Dot。
+
+## 消息发送者
+
+读取历史时同时读取房间当前 members 与 member_profile_snapshots，以 account_user_id 关联发送者。成员 aeon_id 非空表示 Dot；普通当前成员表示用户；未知或已移除成员不标记为用户。旧 raw_messages 助手消息继续按角色与隐藏标记过滤。房间中的 Dot 名称用于更新手机标题。诊断 lastMessageMapping 仅记录角色数量和成员数量，不记录消息正文或成员标识。
+
+## ID 兼容
+
+Dot 与房间 ID 按上游的不透明标识处理，保留带命名空间、标点的合法字符串，并只在上游边界规范化安全整数 ID。消息路径对房间 ID 做 encodeURIComponent，传输层校验固定接口、单个规范编码参数和同源路径；不将 ID 作为请求 URL。诊断可查看 invalidIds 与 withRoom 计数来区分 ID 被拒绝和真实缺少房间。
+
+## 投递与限制
+
+- 请求正文最多 64 KiB，文字最多 60000 UTF-8 字节，宿主 JSON 响应最多 16 MiB。
+- 消息 POST 带相同的 request_id 和 idempotency_token。网关同编号复用结果，禁止编号复用到不同内容。
+- 发送账本当前仅在网关内存中保存，最多 1000 条；满时拒绝新发送，不淘汰未知记录。重启后的防重依赖上游幂等 token，适配层不会自动重发。
+- 宿主取消、网络中断和不确定的服务端错误属于投递未知；本地 status=499 且 responseStatus=null 不能当作确定未发送。
+- 手机接收采用轮询，不声称实现了官方 WebSocket/SSE 的逐事件推送。
+
+## 验证边界
+
+单元测试及受控 Electron 覆盖域接口、独立页面、宿主HTTP调用、发送/接收、账号变化、取消分类与幂等。真实官方账户链路未通过工具执行：已有工具对真实 ChatGPT 操作的拒绝仍需遵守，不以fixture通过替代真实验收。安装新版后，用户可在手机点击 Dots 验证；若接口版本、账号权限或设备验证不兼容，页面会明确报错。

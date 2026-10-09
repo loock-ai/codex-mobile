@@ -1,6 +1,7 @@
 import {RemoteFileCwdContext} from "./sheets/RemoteFileContext";
 import {
   type FormEvent,
+  type ReactNode,
   type RefObject,
   type UIEventHandler,
   useEffect,
@@ -127,6 +128,7 @@ export function ConversationPage({
   steering,
   steerable,
   pendingSteerText,
+  questionCard,
   accessMode,
   resumeError,
   tokenUsage,
@@ -175,6 +177,7 @@ export function ConversationPage({
   steering: boolean;
   steerable: boolean;
   pendingSteerText: string;
+  questionCard?: ReactNode;
   accessMode: "interactive" | "readOnly";
   resumeError: string;
   tokenUsage: Record<string, any> | null;
@@ -213,7 +216,7 @@ export function ConversationPage({
   const isNewChat = !active.id;
   const hasDraft = Boolean(draft.trim() || draftImages.length || draftFiles.length);
   const desktopBridge = client?.backend === "desktop-cdp" || client?.backend === "desktop-control";
-  const canSteer = busy && steerable && hasDraft && !desktopBridge;
+  const canSteer = busy && steerable && hasDraft && client?.backend !== "desktop-cdp";
   const realtime = useRealtimeConversation({
     client,
     threadId: String(active.id ?? ""),
@@ -441,6 +444,7 @@ export function ConversationPage({
             )) : !isNewChat && (
               <div className="empty-state">{t("开始一次新的 Codex 对话")}</div>
             )}
+            {questionCard}
           </div>
         </div>
       </div>
