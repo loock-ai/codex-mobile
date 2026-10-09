@@ -28,10 +28,7 @@ if(!app.requestSingleInstanceLock()){app.quit();}else{
   });
   handle('status',()=>controller.status());handle('save',c=>controller.save(c));
   handle('start',()=>controller.start());handle('stop',()=>controller.stop());
-  handle('restart',async()=>{
-   const answer=await dialog.showMessageBox(panel,{type:'question',title:'重启 ChatGPT',message:'确认桌面任务已完成，未发送草稿已保存。',detail:'启动器将正常退出并重新打开 ChatGPT，开启本机控制。不会强制结束无法退出的应用。',buttons:['取消','重启并连接'],defaultId:0,cancelId:0});
-   if(answer.response!==1)return controller.status();return controller.restartDesktop(true);
-  });
+  handle('restart',()=>controller.restartDesktop());
   handle('open-desktop',()=>controller.openDesktop());
   handle('copy-url',()=>{const url=controller.status().accessUrl;if(!url)throw new Error('请先启动连接');clipboard.writeText(url);});
   handle('open-mobile',openWeb);

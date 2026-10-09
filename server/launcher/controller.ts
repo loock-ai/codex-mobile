@@ -7,7 +7,7 @@ import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { hostname, networkInterfaces } from 'node:os';
 import { loadConfig,saveConfig,validateConfig,discoverDesktopCli,type LauncherConfig } from './config.js';
-import { CdpDesktopAdapter } from '../cdp/adapter.js';
+import {forceStopDesktop} from './desktop-process.js';
 import { DesktopControlChannel } from '../cdp/control-channel.js';
 import { CdpControlTransport } from '../cdp/control-transport.js';
 import { createControlGateway } from '../cdp/control-gateway.js';
@@ -17,7 +17,7 @@ import { startManagedAppServer,appServerEnvironment } from '../app-server-manage
 const exec=promisify(execFile);
 type Service={port:number;close():Promise<void>};
 export interface LauncherStatus {config:LauncherConfig;running:boolean;phase:string;error:string;clients:number;approvals:number;thread:string;accessUrl:string|null;logs:string[]}
-interface Dependencies {start?:(config:LauncherConfig)=>Promise<Service>;desktopRunning?:()=>Promise<boolean>;openDesktop?:(config:LauncherConfig)=>Promise<void>}
+interface Dependencies {start?:(config:LauncherConfig)=>Promise<Service>;desktopRunning?:()=>Promise<boolean>;openDesktop?:(config:LauncherConfig)=>Promise<void>;forceStopDesktop?:(config:LauncherConfig)=>Promise<void>;launchDebugDesktop?:(config:LauncherConfig)=>Promise<void>;debugReady?:()=>Promise<boolean>}
 export class LauncherController extends EventEmitter {
  private config!:LauncherConfig;private service:Service|null=null;private phase='未启动';private error='';private clients=0;private approvals=0;private thread='';private logs:string[]=[];private queue:Promise<unknown>=Promise.resolve();private timer:ReturnType<typeof setInterval>|null=null;
  constructor(private configFile:string,private packageRoot:string,private deps:Dependencies={}){super();}
@@ -35,23 +35,21 @@ export class LauncherController extends EventEmitter {
  private async desktopRunning(){if(this.deps.desktopRunning)return this.deps.desktopRunning();const {stdout}=await exec('/bin/ps',['-axo','comm='],{timeout:3000});return stdout.split('\n').some(s=>s.trim()===join(this.config.appPath,'Contents/MacOS/ChatGPT'));}
  async openDesktop(){if(this.deps.openDesktop)return this.deps.openDesktop(this.config);await exec('/usr/bin/open',[this.config.appPath],{timeout:5000});}
  private async launchDebugDesktop(){
+  if(this.deps.launchDebugDesktop)return this.deps.launchDebugDesktop(this.config);
   const executable=join(this.config.appPath,'Contents/MacOS/ChatGPT');await access(executable);
   const env=appServerEnvironment(process.env);delete env.CODEX_APP_SERVER_WS_URL;delete env.CODEX_APP_SERVER_FORCE_CLI;delete env.ELECTRON_RUN_AS_NODE;
   const child=spawn(executable,[`--remote-debugging-port=${this.config.cdpPort}`,'--remote-debugging-address=127.0.0.1'],{env,detached:true,stdio:'ignore'});
   await new Promise<void>((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject)});child.unref();
  }
- private async debugReady(){try{const r=await fetch(`http://127.0.0.1:${this.config.cdpPort}/json/version`,{signal:AbortSignal.timeout(1200)});if(!r.ok)return false;const data=await r.json();return typeof data.webSocketDebuggerUrl==='string';}catch{return false;}}
+ private async debugReady(){if(this.deps.debugReady)return this.deps.debugReady();try{const r=await fetch(`http://127.0.0.1:${this.config.cdpPort}/json/version`,{signal:AbortSignal.timeout(1200)});if(!r.ok)return false;const data=await r.json();return typeof data.webSocketDebuggerUrl==='string';}catch{return false;}}
  private async waitDebug(){const end=Date.now()+15000;while(Date.now()<end){if(await this.debugReady())return;await new Promise(r=>setTimeout(r,200));}throw new Error('ChatGPT 未开放 CDP，请使用重启并连接或检查桌面版本');}
- restartDesktop(confirmedIdle=false){return this.serialize(async()=>{
-  if(await this.desktopRunning()) {
-   if(await this.debugReady()){
-    const adapter=new CdpDesktopAdapter(`http://127.0.0.1:${this.config.cdpPort}`);
-    try{const state=await adapter.snapshot();if(state.busy||state.draft.trim()||state.approvals.length)throw new Error('桌面有任务、草稿或审批，请先处理');}catch(error){if(!confirmedIdle||(error instanceof Error&&error.message.includes('桌面有任务')))throw error;}finally{await adapter.close();}
-   }else if(!confirmedIdle)throw new Error('无法检查未开启 CDP 的桌面；请确认所有任务已完成且草稿已保存');
-   await exec('/usr/bin/osascript',['-e','on run argv\n tell application (item 1 of argv) to quit\nend run',this.config.appPath],{timeout:5000});
-   const end=Date.now()+10000;while(await this.desktopRunning()){if(Date.now()>end)throw new Error('桌面尚未退出，请手动处理；不会强制结束');await new Promise(r=>setTimeout(r,200));}
-  }
-  await this.stopInternal();await this.launchDebugDesktop();await this.waitDebug();this.log('ChatGPT 已以 CDP 模式启动');return this.startInternal();
+ restartDesktop(){return this.serialize(async()=>{
+  await this.stopInternal();this.phase='正在重启 ChatGPT';this.changed();
+  try{
+   if(this.deps.forceStopDesktop)await this.deps.forceStopDesktop(this.config);
+   else await forceStopDesktop(join(this.config.appPath,'Contents/MacOS/ChatGPT'));
+   await this.launchDebugDesktop();await this.waitDebug();this.log('ChatGPT 已强制重启并开启 CDP');return this.startInternal();
+  }catch(error){this.phase='重启失败';this.error=error instanceof Error?error.message:String(error);this.log(this.error);throw error;}
  });}
  start(){return this.serialize(()=>this.startInternal());}
  private async startInternal(){

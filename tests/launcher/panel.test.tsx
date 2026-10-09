@@ -41,3 +41,14 @@ it('路由错误显示可读原因，保留完整堆栈给诊断层',async()=>{
  const api:any={getStatus:async()=>status,subscribe:()=>()=>{}};
  render(<LauncherPanel api={api}/>);const alert=await screen.findByRole('alert');expect(alert.textContent).toBe('桌面路由尚未就绪');
 });
+it('二维码默认收起，点击展开并可收回，重启直接交给启动器',async()=>{
+ const status:any={config:defaultConfig(),running:true,phase:'已启动',error:'',clients:1,approvals:0,thread:'',accessUrl:'http://127.0.0.1:19877/?token=fixture',logs:[]};
+ const restart=vi.fn(async()=>status);
+ render(<LauncherPanel api={{getStatus:async()=>status,subscribe:()=>()=>{},restart} as any}/>);
+ const toggle=await screen.findByRole('button',{name:'展开二维码'});
+ expect(screen.queryByRole('img',{name:'手机连接二维码'})).toBeNull();
+ expect(toggle.getAttribute('aria-expanded')).toBe('false');fireEvent.click(toggle);
+ await screen.findByRole('img',{name:'手机连接二维码'});
+ fireEvent.click(screen.getByRole('button',{name:'收起二维码'}));expect(screen.queryByRole('img',{name:'手机连接二维码'})).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'强制重启 ChatGPT'}));await waitFor(()=>expect(restart).toHaveBeenCalledOnce());
+});
