@@ -10,6 +10,22 @@ function deferred<T>() {
 }
 
 describe("会话列表轮询加载器", () => {
+  it("大批项目最多并发两次请求，完成一个后才开始下一个", async () => {
+    const requests = Array.from({ length: 4 }, () => deferred<{ data: any[] }>());
+    const client = { request: vi.fn((_method: string, params: { cwd: string }) =>
+      requests[Number(params.cwd.split("/").pop())].promise) };
+    const loader = createLatestThreadListLoader({});
+    const loading = loader.load(client, ["/project/0", "/project/1", "/project/2", "/project/3"]);
+    expect(client.request).toHaveBeenCalledTimes(2);
+    requests[0].resolve({ data: [] });
+    await vi.waitFor(() => expect(client.request).toHaveBeenCalledTimes(3));
+    requests[1].resolve({ data: [] });
+    await vi.waitFor(() => expect(client.request).toHaveBeenCalledTimes(4));
+    requests[2].resolve({ data: [] });
+    requests[3].resolve({ data: [] });
+    await loading;
+  });
+
   it("按配置项目分别获取最新 5 条会话并独立提交结果", async () => {
     const projectA = deferred<{ data: Array<{ id: string; cwd: string }> }>();
     const projectB = deferred<{ data: Array<{ id: string; cwd: string }> }>();

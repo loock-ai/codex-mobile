@@ -1,0 +1,22 @@
+appId: vip.loock.codex-mobile-launcher
+productName: Codex Mobile Launcher
+asar: true
+npmRebuild: false
+extraMetadata:
+  main: launcher/main.cjs
+files:
+  - launcher/main.cjs
+  - launcher/preload.cjs
+  - launcher-ui/**
+  - npm-dist/**
+  - dist/**
+  - package.json
+mac:
+  category: public.app-category.developer-tools
+  identity: null
+  target:
+    - dir
+  extendInfo:
+    LSUIElement: true
+directories:
+  output: launcher-release

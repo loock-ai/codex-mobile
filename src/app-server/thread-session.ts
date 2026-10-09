@@ -7,7 +7,12 @@ type AnyRecord = Record<string, any>;
 const initialTurnsLimit = 10;
 
 interface Requester {
-  request(method: string, params: unknown): Promise<any>;
+  backend?: string;
+  request(
+    method: string,
+    params: unknown,
+    options?: { timeoutMs?: number },
+  ): Promise<any>;
 }
 
 export interface ResumedThreadSession {
@@ -65,6 +70,7 @@ export async function loadOlderThreadTurns(
   threadId: string,
   cursor: string,
 ): Promise<ThreadTurnsPage> {
+  if(client.backend==='desktop-control')return loadControlTurns(client,threadId,cursor);
   const response = await client.request("thread/turns/list", {
     threadId,
     cursor,
@@ -82,6 +88,7 @@ export async function loadRecentThreadTurns(
   client: Requester,
   threadId: string,
 ): Promise<AnyRecord[]> {
+  if(client.backend==='desktop-control')return (await loadControlTurns(client,threadId)).turns;
   const response = await client.request("thread/turns/list", {
     threadId,
     limit: initialTurnsLimit,
@@ -134,17 +141,30 @@ export async function loadRecoverableRecentThreadTurns(
 export async function resumeThreadSession(
   client: Requester,
   threadId: string,
+  isCurrent: () => boolean = () => true,
 ): Promise<ResumedThreadSession> {
   try {
-    const response = await client.request("thread/resume", {
-      threadId,
-      excludeTurns: true,
-      initialTurnsPage: {
-        limit: initialTurnsLimit,
-        sortDirection: "desc",
-        itemsView: "full",
+    if(client.backend==='desktop-control'){
+      await client.request('desktop/subscribe',{threadIds:[threadId]});
+      if(!isCurrent())throw Object.assign(new Error('会话已切换，恢复请求已取消'),{code:'STALE_RESUME'});
+      const response=await client.request('thread/resume',{threadId,excludeTurns:true},{timeoutMs:60000});
+      if(!isCurrent())throw Object.assign(new Error('会话已切换，恢复请求已取消'),{code:'STALE_RESUME'});
+      const page=await loadControlTurns(client,threadId);
+      return {thread:{...response.thread,turns:page.turns},model:response.model,reasoningEffort:response.reasoningEffort,accessMode:'interactive',settingsSynchronized:false,nextTurnsCursor:page.nextCursor};
+    }
+    const response = await client.request(
+      "thread/resume",
+      {
+        threadId,
+        excludeTurns: true,
+        initialTurnsPage: {
+          limit: initialTurnsLimit,
+          sortDirection: "desc",
+          itemsView: "full",
+        },
       },
-    });
+      { timeoutMs: 60_000 },
+    );
     const initialTurnsPage = response.initialTurnsPage;
     return {
       thread: {
@@ -187,4 +207,38 @@ export async function resumeThreadSession(
       nextTurnsCursor: turnsPage.nextCursor ?? null,
     };
   }
+}
+
+async function loadControlTurns(client:Requester,threadId:string,cursor?:string):Promise<ThreadTurnsPage>{
+  const page=await client.request('thread/turns/list',{threadId,cursor:cursor??null,limit:initialTurnsLimit,sortDirection:'desc',itemsView:'notLoaded'});
+  const turns:AnyRecord[]=[];
+  for(const turn of chronologicalTurns(page.data)){
+    const items:AnyRecord[]=[],seen=new Set<string>(),itemIds=new Set<string>();let next:string|null=null,limit=20;
+    for(let pages=0;;pages++){
+      if(pages>=1000)throw new Error('消息分页超过限制');
+      let result:any;
+      for(;;){try{result=await client.request('thread/items/list',{threadId,turnId:turn.id,cursor:next,limit,sortDirection:'asc'});break;}catch(error){if(limit>1&&((error as {code?:string})?.code==='RESPONSE_TOO_LARGE'||errorMessage(error).includes('decoded message length too large'))){limit=Math.max(1,Math.floor(limit/2));continue;}throw error;}}
+      for(const entry of result.data??[]){
+        if(entry.item&&entry.turnId!==turn.id)throw new Error('消息返回了不匹配的回合');
+        const item=entry.item??entry;
+        if(!itemIds.has(item.id)){itemIds.add(item.id);items.push(item);}
+      }
+      next=result.nextCursor??null;if(!next)break;if(seen.has(next))throw new Error('消息分页游标重复');seen.add(next);
+    }
+    turns.push({...turn,items,itemsView:'full'});
+  }
+  return {turns,nextCursor:page.nextCursor??null};
+}
+
+
+export async function reconcileDesktopTurnsAfterResume(
+  client: Requester,
+  threadId: string,
+  sequenceAtResumeStart: number,
+  readSequence: () => number,
+  resumedTurns: AnyRecord[],
+): Promise<AnyRecord[]> {
+  if (client.backend !== "desktop-control" || sequenceAtResumeStart === readSequence()) return resumedTurns;
+  // 页面提交快照时合并加载期间观察到的实时状态，不要求活跃会话静默。
+  return loadRecentThreadTurns(client,threadId);
 }

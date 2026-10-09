@@ -6,6 +6,9 @@ import {
   useRef,
   useState,
 } from "react";
+import {createHistoryObservation,observeHistoryEvent,mergeObservedHistory,isHistoryEvent,observingHistoryClient,type HistoryObservation} from "./app-server/history-observation";
+import {loadDesktopModels} from "./app-server/model-catalog";
+import {useDesktopBackends} from "./backends/desktop-hosts";
 import { AppServerClient, type RpcMessage } from "./app-server/client";
 import {
   createLatestThreadListLoader,
@@ -27,6 +30,7 @@ import {
   loadOlderThreadTurns,
   prependUniqueTurns,
   resumeThreadSession,
+  reconcileDesktopTurnsAfterResume,
   type OlderTurnsLoadState,
   type ThreadAccessMode,
 } from "./app-server/thread-session";
@@ -207,10 +211,13 @@ function BackendWorkspace({
     useState<PendingSteerMessage | null>(null);
   const [error, setError] = useState("");
   const [requests, setRequests] = useState<RpcMessage[]>([]);
+  const [approvalSubmitting, setApprovalSubmitting] = useState(false);
+  const [approvalError, setApprovalError] = useState("");
   const [userAnswers, setUserAnswers] = useState<Record<string, string>>({});
   const [models, setModels] = useState<AnyRecord[]>([]);
   const [permissionProfiles, setPermissionProfiles] = useState<AnyRecord[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
+  const [desktopModelOverride,setDesktopModelOverride]=useState(false);
   const [selectedEffort, setSelectedEffort] = useState<string | null>(null);
   const [selectedServiceTier, setSelectedServiceTier] = useState<string | null>(null);
   const [selectedPermission, setSelectedPermission] = useState("");
@@ -253,6 +260,7 @@ function BackendWorkspace({
   const fullyLoadedProjectCwdsRef = useRef(new Set<string>());
   const refreshSequenceRef = useRef(0);
   const threadNotificationSequenceRef = useRef(0);
+  const historyObservationRef=useRef<HistoryObservation|null>(null);
   const pendingSequenceRef = useRef(0);
   const readLocalUnread = () =>
     readUnreadThreadIds(localStorage, backend.id);
@@ -550,12 +558,21 @@ function BackendWorkspace({
       onNotification: (_backendId, message, source) => {
           const client = source as AppServerClient;
           const params = (message.params ?? {}) as AnyRecord;
+          observeHistoryEvent(historyObservationRef.current,message);
           if (
-            params.threadId &&
+            isHistoryEvent(message.method??"") && params.threadId &&
             params.threadId ===
               (activeThreadTargetRef.current ?? activeRef.current?.id)
           ) {
             threadNotificationSequenceRef.current += 1;
+          }
+          if (message.method === "desktop/disconnected") { setError(params.reason ?? "桌面控制通道断开"); manager.socket(backend.id)?.close(1011, "desktop disconnected"); }
+          if (message.method === "desktop/error") setError(params.message ?? t("桌面操作未确认，请在桌面核对"));
+          if (message.method === "desktop/approval/resolved") setRequests(current => current.filter(request => String(request.id) !== String(params.id)));
+          if ((message.method === "desktop/thread/changed" || message.method === "desktop/thread/snapshot") && params.thread) {
+            activeThreadTargetRef.current = params.threadId;
+            setActive(params.thread);
+            setBusy(params.thread.status?.type === "active");
           }
           if (message.method === "turn/started" && params.turn) {
             if (params.threadId) {
@@ -746,13 +763,16 @@ function BackendWorkspace({
       },
       onRequest: (_backendId, request, source) => {
           const client = source as AppServerClient;
+          if(client.backend==='desktop-control'&&(request.params as AnyRecord)?.threadId!==activeThreadTargetRef.current)return;
           if (
             request.method === "item/commandExecution/requestApproval" ||
             request.method === "item/fileChange/requestApproval" ||
             request.method === "item/permissions/requestApproval" ||
             request.method === "item/tool/requestUserInput"
           ) {
-            setRequests((current) => [...current, request]);
+            setRequests((current) => current.some(entry => entry.id === request.id) ? current : [...current, request]);
+          } else if (client.backend === "desktop-control") {
+            setError("此请求需要在桌面处理：" + request.method);
           } else {
             client.respondError(
               request.id!,
@@ -765,8 +785,10 @@ function BackendWorkspace({
       },
       onReady: (_backendId, source) => {
         const client = source as AppServerClient;
+        setDesktopModelOverride(false);
         clientRef.current = client;
         void (async () => {
+          let observation:HistoryObservation|null=null;
           try {
             if (!disposed && manager.client(backend.id) === source) {
             const [
@@ -774,7 +796,9 @@ function BackendWorkspace({
               permissionResult,
               configResult,
               rateLimitResult,
-            ] = await Promise.all([
+            ] = await (client.backend === "desktop-control"
+              ? Promise.all([loadDesktopModels(client).catch(reason=>({data:[] as AnyRecord[],error:reason instanceof Error?reason.message:String(reason)})), Promise.resolve({data:[] as AnyRecord[]}), Promise.resolve({config:{} as AnyRecord}), Promise.resolve(null)] as const)
+              : Promise.all([
               client.request<{ data: AnyRecord[] }>("model/list", {
                 limit: 100,
                 includeHidden: false,
@@ -792,13 +816,14 @@ function BackendWorkspace({
               client
                 .request<AnyRecord>("account/rateLimits/read", undefined)
                 .catch(() => null),
-            ]);
+            ]));
             if (disposed || manager.client(backend.id) !== source) return;
             const availableProfiles = permissionResult.data.filter(
               (profile) => profile.allowed,
             );
+            if("error" in modelResult&&modelResult.error)setError(t("模型列表加载失败：{message}",{message:String(modelResult.error)}));
             const config = (configResult.config ?? {}) as AnyRecord;
-            const configuredModel =
+            const configuredModel = client.backend === "desktop-control" ? "" :
               config.model ||
               modelResult.data.find((model) => model.isDefault)?.model ||
               modelResult.data[0]?.model ||
@@ -849,7 +874,15 @@ function BackendWorkspace({
             const currentThread = activeRef.current;
             if (currentThread?.id) {
               activeThreadTargetRef.current = currentThread.id;
-              const resumed = await resumeThreadSession(client, currentThread.id);
+              observation=client.backend==="desktop-control"?createHistoryObservation(currentThread.id):null;
+              historyObservationRef.current=observation;
+              const resumeSequence=threadNotificationSequenceRef.current;
+              const historyClient=observingHistoryClient(client,observation);
+              let resumed = await resumeThreadSession(historyClient, currentThread.id,()=>!disposed&&manager.client(backend.id)===source&&activeThreadTargetRef.current===currentThread.id);
+              if(client.backend==='desktop-control'&&threadNotificationSequenceRef.current!==resumeSequence){
+                const turns=await reconcileDesktopTurnsAfterResume(historyClient,currentThread.id,resumeSequence,()=>threadNotificationSequenceRef.current,resumed.thread.turns??[]);
+                resumed={...resumed,thread:{...resumed.thread,turns}};
+              }
               if (
                 !disposed &&
                 manager.client(backend.id) === source &&
@@ -862,10 +895,7 @@ function BackendWorkspace({
                   resumed.reasoningEffort,
                   resumed.serviceTier,
                 );
-                setActive({
-                  ...resumed.thread,
-                  isPinned: resumed.thread.isPinned === true,
-                });
+                setActive(current=>{const next=mergeObservedHistory(resumed.thread,current,observation);setBusy(["inProgress","in_progress","running"].includes(next.turns?.at(-1)?.status));return {...next,isPinned:next.isPinned===true};});
                 resetOlderTurns(resumed.nextTurnsCursor);
                 setConversationLoadState("ready");
                 setConversationLoadError("");
@@ -882,14 +912,12 @@ function BackendWorkspace({
                   setSelectedApprovalsReviewer(resumed.approvalsReviewer);
                 }
                 setSelectedPermission(resumed.activePermissionProfile?.id ?? "");
-                const lastTurn = resumed.thread.turns?.at(-1);
-                setBusy(
-                  ["inProgress", "in_progress", "running"].includes(lastTurn?.status),
-                );
+
               }
             }
           }
           } catch (reason) {
+            if((reason as {code?:string})?.code==='STALE_RESUME')return;
             if (
               !disposed &&
               manager.client(backend.id) === source
@@ -905,7 +933,7 @@ function BackendWorkspace({
                 );
               }
             }
-          }
+          } finally {if(historyObservationRef.current===observation)historyObservationRef.current=null;}
         })();
       },
     });
@@ -1004,11 +1032,19 @@ function BackendWorkspace({
 
   async function loadThreadDetail(threadId: string, sequence: number) {
     const client = clientRef.current;
+    const observation=client?.backend==='desktop-control'?createHistoryObservation(threadId):null;
+    historyObservationRef.current=observation;
     try {
       if (!client) throw new Error(t("设备尚未连接，请稍后重试"));
-      const session = await resumeThreadSession(client, threadId);
+      const resumeSequence=threadNotificationSequenceRef.current;
+      const historyClient=observingHistoryClient(client,observation);
+      let session = await resumeThreadSession(historyClient, threadId,()=>sequence===openSequenceRef.current&&clientRef.current===client);
+      if(client.backend==='desktop-control'&&threadNotificationSequenceRef.current!==resumeSequence){
+        const turns=await reconcileDesktopTurnsAfterResume(historyClient,threadId,resumeSequence,()=>threadNotificationSequenceRef.current,session.thread.turns??[]);
+        session={...session,thread:{...session.thread,turns}};
+      }
       if (sequence !== openSequenceRef.current) {
-        if (activeThreadTargetRef.current !== threadId) {
+        if (activeThreadTargetRef.current !== threadId && client.backend !== "desktop-control") {
           void client
             .request("thread/unsubscribe", { threadId })
             .catch(() => undefined);
@@ -1023,10 +1059,7 @@ function BackendWorkspace({
         session.reasoningEffort,
         session.serviceTier,
       );
-      setActive({
-        ...session.thread,
-        isPinned: session.thread.isPinned === true,
-      });
+      setActive(current=>{const next=mergeObservedHistory(session.thread,current,observation);setBusy(["inProgress","in_progress","running"].includes(next.turns?.at(-1)?.status));return {...next,isPinned:next.isPinned===true};});
       resetOlderTurns(session.nextTurnsCursor);
       setActiveSettingsSynchronized(session.settingsSynchronized);
       setActiveThreadAccessMode(session.accessMode);
@@ -1043,12 +1076,9 @@ function BackendWorkspace({
       setSelectedPermission(session.activePermissionProfile?.id ?? "");
       setConversationLoadState("ready");
       setConversationLoadError("");
-      const lastTurn = session.thread.turns?.at(-1);
-      setBusy(
-        ["inProgress", "in_progress", "running"].includes(lastTurn?.status),
-      );
 
-      if (session.thread.cwd) {
+
+      if (session.thread.cwd && client.backend !== "desktop-control") {
         void client
           .request<{ data: AnyRecord[] }>("permissionProfile/list", {
             limit: 100,
@@ -1071,6 +1101,7 @@ function BackendWorkspace({
         );
       }
     } finally {
+      if(historyObservationRef.current===observation)historyObservationRef.current=null;
       if (sequence === openSequenceRef.current) setOpeningThreadId("");
     }
   }
@@ -1092,7 +1123,9 @@ function BackendWorkspace({
   }, [threads]);
 
   function openThread(thread: AnyRecord) {
+    setRequests(current=>current.filter(request=>(request.params as AnyRecord)?.threadId===thread.id));setApprovalError('');
     const sequence = ++openSequenceRef.current;
+    setDesktopModelOverride(false);
     markThreadRead(String(thread.id));
     resetDraftContext();
     setDraft("");
@@ -1150,6 +1183,7 @@ function BackendWorkspace({
       ? busy
       : startingThreadContext === draftContextGenerationRef.current;
     if (conversationBusy) {
+      if(clientRef.current.backend==='desktop-control'){setError('请等待当前任务完成，或先停止任务');return;}
       let sent = false;
       const threadId = String(active?.id ?? "");
       const turnId = activeTurnId(active);
@@ -1229,7 +1263,8 @@ function BackendWorkspace({
       const uploadedFiles = await Promise.all(
         pendingFiles.map((file) => uploadFile(backend, file.file)),
       );
-      const shouldSendSettings = !thread?.id || activeSettingsSynchronized;
+      const shouldSendSettings = clientRef.current.backend !== "desktop-control" && (!thread?.id || activeSettingsSynchronized);
+      const shouldSendModel = shouldSendSettings || (clientRef.current.backend === "desktop-control" && desktopModelOverride);
       const effectivePermission =
         !thread?.id && newChatPermissionMode
           ? newChatPermissionMode.permissions
@@ -1253,14 +1288,12 @@ function BackendWorkspace({
           activePermissionProfile?: { id: string } | null;
         }>("thread/start", {
           cwd: thread?.cwd ?? null,
-          ...(selectedModel ? { model: selectedModel } : {}),
-          ...(selectedServiceTier ? { serviceTier: selectedServiceTier } : {}),
-          ...(effectivePermission ? { permissions: effectivePermission } : {}),
-          approvalPolicy: effectiveApprovalPolicy,
-          approvalsReviewer: effectiveApprovalsReviewer,
+          ...(shouldSendModel && selectedModel ? { model: selectedModel } : {}),
+          ...(clientRef.current.backend !== 'desktop-control' && selectedServiceTier ? { serviceTier: selectedServiceTier } : {}),
+          ...(clientRef.current.backend !== 'desktop-control' && effectivePermission ? { permissions: effectivePermission } : {}),
+          ...(clientRef.current.backend !== "desktop-control" ? {approvalPolicy: effectiveApprovalPolicy, approvalsReviewer: effectiveApprovalsReviewer} : {}),
         });
         thread = started.thread;
-        activeThreadTargetRef.current = thread.id;
         setThreads((current) => [
           { ...thread!, status: { type: "active" } },
           ...current.filter((entry) => entry.id !== thread!.id),
@@ -1272,6 +1305,7 @@ function BackendWorkspace({
           started.serviceTier ?? selectedServiceTier,
         );
         if (draftContext === draftContextGenerationRef.current) {
+          activeThreadTargetRef.current = thread.id;
           setStartingThreadContext(null);
           if (started.model) setSelectedModel(started.model);
           setSelectedEffort(startedSettings.effort);
@@ -1313,11 +1347,14 @@ function BackendWorkspace({
           };
         });
       }
+      if(clientRef.current.backend==='desktop-control'&&draftContext===draftContextGenerationRef.current){
+        await clientRef.current.request('desktop/subscribe',{threadIds:[thread.id]});
+      }
       const startedTurn = await clientRef.current.request<{ turn: AnyRecord }>("turn/start", {
         threadId: thread.id,
         input: buildTurnInput(text, pendingImages, uploadedFiles),
-        ...(shouldSendSettings && selectedModel ? { model: selectedModel } : {}),
-        ...(shouldSendSettings && selectedEffort
+        ...(shouldSendModel && selectedModel ? { model: selectedModel } : {}),
+        ...(shouldSendModel && selectedEffort
           ? { effort: selectedEffort }
           : {}),
         ...(shouldSendSettings && selectedServiceTier
@@ -1337,10 +1374,8 @@ function BackendWorkspace({
       if (draftContext === draftContextGenerationRef.current) {
         setActive((current) => {
           if (!current) return current;
-          return applyTurnStarted(current, {
-            threadId: thread!.id,
-            turn: startedTurn.turn,
-          });
+          const params = { threadId: thread!.id, turn: startedTurn.turn };
+          return startedTurn.turn.status === "completed" ? applyCompletedTurn(current, params) : applyTurnStarted(current, params);
         });
       }
     } catch (reason) {
@@ -1362,7 +1397,7 @@ function BackendWorkspace({
             ? removePendingTurn(current, pendingTurnId)
             : current,
         );
-        setDraft((current) => current || text);
+        if ((reason as {code?:string})?.code !== "ACTION_WRITE_UNKNOWN") setDraft((current) => current || text);
         setDraftImages((current) => mergeDraftImages(current, pendingImages));
         setDraftFiles((current) =>
           current.length ? current : pendingFiles,
@@ -1552,8 +1587,9 @@ function BackendWorkspace({
 
   const selectedModelEntry =
     models.find((model) => model.model === selectedModel) ?? null;
-  const selectedModelLabel =
-    !activeSettingsSynchronized && active?.id
+  const selectedModelLabel = clientRef.current?.backend === "desktop-control"
+    ? selectedModelEntry?.displayName || selectedModel || t("沿用桌面模型")
+    : !activeSettingsSynchronized && active?.id
       ? t("沿用线程模型")
       : selectedModelEntry?.displayName ||
         selectedModel ||
@@ -1589,6 +1625,7 @@ function BackendWorkspace({
           )?.description,
         );
   const chooseModel = (modelId: string) => {
+    if(clientRef.current?.backend === "desktop-control")setDesktopModelOverride(true);
     const model = models.find((option) => option.model === modelId);
     const normalized = normalizeModelSettings(
       model,
@@ -1609,6 +1646,13 @@ function BackendWorkspace({
     setPicker(null);
   };
   const approval = requests[0] ?? null;
+  async function submitApproval(result: unknown) {
+    if (!approval || !clientRef.current || approvalSubmitting) return;
+    const id=approval.id!;setApprovalSubmitting(true);setApprovalError("");
+    try { await clientRef.current.respond(id,result); setRequests(current=>current.filter(request=>request.id!==id)); return true; }
+    catch (reason) { setApprovalError(reason instanceof Error?reason.message:String(reason)); return false; }
+    finally { setApprovalSubmitting(false); }
+  }
   const finishRequest = (decision: "accept" | "decline") => {
     if (!approval) return;
     const params = (approval.params ?? {}) as AnyRecord;
@@ -1618,25 +1662,24 @@ function BackendWorkspace({
         ...(requested.fileSystem != null ? { fileSystem: requested.fileSystem } : {}),
         ...(requested.network != null ? { network: requested.network } : {}),
       };
-      clientRef.current?.respond(approval.id!, {
+      void submitApproval({
         permissions: decision === "accept" ? granted : {},
         scope: "turn",
       });
     } else {
-      clientRef.current?.respond(approval.id!, { decision });
+      void submitApproval({ decision });
     }
-    setRequests((current) => current.slice(1));
+
   };
   const answerQuestions = () => {
     if (!approval) return;
     const questions = ((approval.params as AnyRecord)?.questions ?? []) as AnyRecord[];
-    clientRef.current?.respond(approval.id!, {
+    void submitApproval({
       answers: Object.fromEntries(
         questions.map((question) => [question.id, { answers: [userAnswers[question.id] ?? ""] }]),
       ),
-    });
-    setUserAnswers({});
-    setRequests((current) => current.slice(1));
+    }).then(success=>{if(success)setUserAnswers({});});
+
   };
 
   const startNewChat = (
@@ -1645,6 +1688,9 @@ function BackendWorkspace({
     nextDraftImages: DraftImage[] = [],
     nextDraftFiles: DraftFile[] = [],
   ) => {
+    setRequests([]);setApprovalError('');setUserAnswers({});
+    setDesktopModelOverride(false);if(clientRef.current?.backend==='desktop-control'){setSelectedModel('');setSelectedEffort(null);}
+    if(clientRef.current?.backend==='desktop-control')void clientRef.current.request('desktop/unsubscribe',{}).catch(()=>{});
     const savedCwd = window.localStorage.getItem(
       `codex-mobile:new-chat-project:${backend.id}`,
     );
@@ -1795,6 +1841,7 @@ function BackendWorkspace({
           rateLimits={rateLimits}
           pendingAction={pendingAction}
           selectedServiceTier={selectedServiceTier}
+          modelSelectionAvailable={models.length>0}
           selectedModelLabel={selectedModelLabel}
           selectedEffort={selectedEffort}
           selectedPermissionLabel={selectedPermissionLabel}
@@ -1855,6 +1902,11 @@ function BackendWorkspace({
         </div>
       )}
       <ApprovalSheet
+        onDesktopChoice={(choice) => {
+          if (approval) void submitApproval({ desktopChoice: choice });
+        }}
+        submitting={approvalSubmitting}
+        submissionError={approvalError}
         approval={approval}
         userAnswers={userAnswers}
         onAnswerChange={(questionId, value) =>
@@ -1879,7 +1931,8 @@ function BackendWorkspace({
         selectedSpeedLabel={selectedSpeedLabel}
         selectedPermissionModeId={selectedPermissionModeId}
         onPickerChange={setPicker}
-        onChooseEffort={setSelectedEffort}
+        allowSpeed={clientRef.current?.backend!=="desktop-control"}
+        onChooseEffort={effort=>{if(clientRef.current?.backend==="desktop-control")setDesktopModelOverride(true);setSelectedEffort(effort);}}
         onChooseModel={chooseModel}
         onChooseSpeed={setSelectedServiceTier}
         onChoosePermissionMode={choosePermissionMode}
@@ -1979,6 +2032,7 @@ function ConfiguredApp({
   appUpdate: AppUpdateController;
 }) {
   const [registry, setRegistry] = useState(initialRegistry);
+  const [runtimeSelection,setRuntimeSelection]=useState<string|null>(null);
   const [summaries, setSummaries] = useState<
     Record<string, BackendRuntimeSummary>
   >({});
@@ -2012,6 +2066,8 @@ function ConfiguredApp({
     closeSidebar,
     refresh: refreshAllBackends,
   } = useSidebarRefresh(resetListExpansion);
+  const desktopBackends=useDesktopBackends(registry.backends,refreshVersion);
+  const runtimeBackends=desktopBackends.backends;
   const selectListBackend = useCallback((backendId: string) => {
     window.localStorage.setItem("codex-mobile:list-backend", backendId);
     setListBackendId(backendId);
@@ -2106,8 +2162,8 @@ function ConfiguredApp({
   }, [closeSidebar, openSidebar, sidebarOpen]);
 
   const enabledBackends = useMemo(
-    () => registry.backends.filter((backend) => backend.enabled),
-    [registry.backends],
+    () => runtimeBackends.filter((backend) => backend.enabled),
+    [runtimeBackends],
   );
   const mountedBackends = useMemo(
     () =>
@@ -2118,7 +2174,7 @@ function ConfiguredApp({
   );
   const selectedBackend =
     mountedBackends.find(
-      (backend) => backend.id === registry.selectedBackendId,
+      (backend) => backend.id === (runtimeSelection ?? registry.selectedBackendId),
     ) ?? mountedBackends[0];
 
   useEffect(() => {
@@ -2131,6 +2187,7 @@ function ConfiguredApp({
   }, [listBackendId, mountedBackends, selectListBackend]);
 
   const persistRegistry = useCallback((next: BackendRegistry) => {
+    setRuntimeSelection(null);
     saveBackendRegistry(window.localStorage, next);
     setRegistry(
       loadBackendRegistry(window.localStorage, window.location.origin),
@@ -2138,6 +2195,7 @@ function ConfiguredApp({
   }, []);
 
   const selectBackend = useCallback((backendId: string) => {
+    setRuntimeSelection(backendId);
     setRegistry((current) => {
       const target = current.backends.find(
         (backend) => backend.id === backendId && backend.enabled,
@@ -2231,8 +2289,7 @@ function ConfiguredApp({
         )
       ? "error"
       : "loading";
-  const listError = scopedSnapshots
-    .map((snapshot) => snapshot.error)
+  const listError = [...scopedSnapshots.map((snapshot) => snapshot.error), desktopBackends.error]
     .filter(Boolean)
     .join("；");
   const openingThreadId =
@@ -2402,7 +2459,7 @@ function ConfiguredApp({
             conversationVisible={
               backend.id === selectedBackend.id && !sidebarOpen
             }
-            backends={registry.backends}
+            backends={runtimeBackends}
             summaries={summaries}
             onSummaryChange={updateSummary}
             onSnapshotChange={updateSnapshot}
@@ -2421,7 +2478,7 @@ function ConfiguredApp({
       >
         <aside className="conversation-sidebar" aria-label={t("会话列表")}>
           <ThreadListPage
-            backends={registry.backends}
+            backends={runtimeBackends}
             summaries={summaries}
             selectedBackendId={listBackendId}
             loadingBackendIds={loadingBackendIds}
@@ -2456,7 +2513,7 @@ function ConfiguredApp({
         />
       </div>
       <BackendAttentionBanner
-        backends={registry.backends}
+        backends={runtimeBackends}
         summaries={summaries}
         selectedBackendId={selectedBackend.id}
         onSelect={(backendId) => {

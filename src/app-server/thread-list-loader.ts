@@ -68,8 +68,17 @@ export function createLatestThreadListLoader(
       if (pending?.client === client) return pending.promise;
 
       const sequence = ++latestSequence;
+      let nextProject = 0;
+      const loadNextProjects = async () => {
+        while (sequence === latestSequence && nextProject < projects.length) {
+          const cwd = projects[nextProject++];
+          await loadProject(client, cwd, sequence);
+        }
+      };
       const request = projects.length
-        ? Promise.all(projects.map((cwd) => loadProject(client, cwd, sequence)))
+        ? Promise.all(
+            Array.from({ length: Math.min(2, projects.length) }, loadNextProjects),
+          )
         : client
             .request("thread/list", {
               limit: 50,

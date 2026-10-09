@@ -54,6 +54,7 @@ describe("npm 全局安装包", () => {
     expect(packageJson.engines.node).toBe(">=20");
     expect(packageJson.publishConfig.access).toBe("public");
     expect(packageJson.dependencies).toEqual({
+      "playwright-core": expect.any(String),
       qrcode: expect.any(String),
       ws: expect.any(String),
     });

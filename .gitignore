@@ -5,3 +5,6 @@ test-results/
 playwright-report/
 .DS_Store
 *.tsbuildinfo
+
+launcher-ui/
+launcher-release/

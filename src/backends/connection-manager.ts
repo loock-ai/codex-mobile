@@ -66,6 +66,7 @@ function configSignature(config: BackendConfig) {
     baseUrl: config.baseUrl,
     token: config.token,
     enabled: config.enabled,
+    desktopHostId: config.desktopHostId,
   });
 }
 
@@ -103,7 +104,7 @@ export class BackendConnectionManager {
         ((url) => new WebSocket(url) as unknown as WebSocketLike),
       createClient:
         options.createClient ??
-        ((socket) => new AppServerClient(socket as unknown as WebSocket)),
+        ((socket,backend) => new AppServerClient(socket as unknown as WebSocket,{desktopHostId:backend.desktopHostId})),
     };
   }
 

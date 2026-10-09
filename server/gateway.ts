@@ -6,6 +6,7 @@ import { extname, isAbsolute, join, normalize } from "node:path";
 import WebSocket, { WebSocketServer } from "ws";
 
 export interface GatewayOptions {
+  onClientCount?: (count: number) => void;
   host: string;
   port: number;
   mode: "managed" | "external";
@@ -309,6 +310,7 @@ export async function createGateway(options: GatewayOptions): Promise<Gateway> {
   });
 
   const sockets = new Set<WebSocket>();
+  const connectedClients = new Set<WebSocket>();
   const wss = new WebSocketServer({ noServer: true });
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url ?? "/", "http://gateway.local");
@@ -329,6 +331,9 @@ export async function createGateway(options: GatewayOptions): Promise<Gateway> {
 
   wss.on("connection", (client) => {
     sockets.add(client);
+    connectedClients.add(client);
+    options.onClientCount?.(connectedClients.size);
+    client.once("close", () => { connectedClients.delete(client); options.onClientCount?.(connectedClients.size); });
     const upstream = new WebSocket(options.upstreamUrl);
     sockets.add(upstream);
     const pending: Array<{ data: WebSocket.RawData; binary: boolean }> = [];

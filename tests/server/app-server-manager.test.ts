@@ -8,6 +8,24 @@ import {
 } from "../../server/app-server-manager.js";
 
 describe("app-server 运行模式", () => {
+  it("Desktop 模式连接 Desktop 的共享地址而不创建托管服务", () => {
+    expect(resolveRuntimeConfig({
+      CODEX_APP_SERVER_MODE: "desktop",
+      CODEX_APP_SERVER_WS_URL: "ws://127.0.0.1:19876",
+    })).toMatchObject({ mode: "external", upstreamUrl: "ws://127.0.0.1:19876" });
+  });
+
+  it("Desktop 模式缺少地址时拒绝启动，避免产生第二个写入进程", () => {
+    expect(() => resolveRuntimeConfig({ CODEX_APP_SERVER_MODE: "desktop" }))
+      .toThrow("CODEX_APP_SERVER_WS_URL");
+  });
+
+  it("Desktop 模式仅接受本机 WebSocket 地址", () => {
+    for (const url of ["http://127.0.0.1:19876", "ws://remote.example:19876", "ws://user:secret@127.0.0.1:19876"]) {
+      expect(() => resolveRuntimeConfig({ CODEX_APP_SERVER_MODE: "desktop", CODEX_APP_SERVER_WS_URL: url }))
+        .toThrow("本机 WebSocket");
+    }
+  });
   it("不会把网关身份和访问口令传给 app-server 子进程", () => {
     expect(
       appServerEnvironment({

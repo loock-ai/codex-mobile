@@ -44,6 +44,30 @@ class MemoryStorage implements Storage {
 }
 
 describe("多后端配置存储", () => {
+  it("新连接链接更新已有同源设备口令，保留其他设备和选择", () => {
+    const storage=new MemoryStorage();
+    let saved=upsertBackend(createDefaultBackendRegistry('http://gateway.local:19877','old-token'),{id:'other',name:'Other',baseUrl:'http://gateway.local:19878',token:'other-token',enabled:true,order:1});
+    saved.selectedBackendId='other';saveBackendRegistry(storage,saved);
+    const restored=loadBackendRegistry(storage,'http://gateway.local:19877/','new-token');
+    expect(restored).toEqual({...saved,backends:saved.backends.map(b=>b.id==='current-origin'?{...b,token:'new-token'}:b)});
+    saveBackendRegistry(storage,restored);expect(loadBackendRegistry(storage,'http://gateway.local:19877').backends[0].token).toBe('new-token');
+  });
+  it("链接没有口令时保留缓存；禁用条目只更新口令不启用", () => {
+    const storage=new MemoryStorage();
+    let saved=upsertBackend(createDefaultBackendRegistry('http://gateway.local:19877','old-token'),{id:'other',name:'Other',baseUrl:'https://gateway.local:19877',token:'other-token',enabled:true,order:1});
+    saved=setBackendEnabled(saved,'current-origin',false);saveBackendRegistry(storage,saved);
+    expect(loadBackendRegistry(storage,'http://gateway.local:19877')).toEqual(saved);
+    const updated=loadBackendRegistry(storage,'http://gateway.local:19877','new-token');
+    expect(updated.backends[0]).toMatchObject({token:'new-token',enabled:false});expect(updated.selectedBackendId).toBe('other');expect(updated.backends[1].token).toBe('other-token');
+  });
+  it("无同源设备且配置已满时不覆盖其他设备或新增条目", () => {
+    const storage=new MemoryStorage();let saved=createDefaultBackendRegistry('http://gateway.local:19878','keep-0');
+    for(let i=1;i<MAX_BACKENDS;i++)saved=upsertBackend(saved,{id:'b'+i,name:'B'+i,baseUrl:'http://gateway.local:'+String(19878+i),token:'keep-'+i,enabled:true,order:i});
+    saveBackendRegistry(storage,saved);
+    expect(loadBackendRegistry(storage,'http://gateway.local:19877','link-token')).toEqual(saved);
+    expect(loadBackendRegistry(storage,'https://gateway.local:19878','link-token')).toEqual(saved);
+    expect(loadBackendRegistry(storage,'null','link-token')).toEqual(saved);
+  });
   it("首次打开时把当前 origin 建为默认后端", () => {
     expect(createDefaultBackendRegistry("http://192.168.100.8:4173/")).toEqual({
       version: 1,

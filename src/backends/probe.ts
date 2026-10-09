@@ -13,7 +13,7 @@ export interface GatewayHostInfo {
 
 export async function fetchBackendProjects(config: BackendConfig) {
   const response = await fetch(
-    withToken(config.baseUrl, "/api/projects", config.token),
+    withToken(config.baseUrl, "/api/projects", config.token, config.desktopHostId),
     { method: "GET", mode: "cors" },
   );
   if (!response.ok) throw new Error(t("项目目录接口返回 {status}", { status: response.status }));
@@ -23,9 +23,10 @@ export async function fetchBackendProjects(config: BackendConfig) {
     : [];
 }
 
-function withToken(baseUrl: string, path: string, token: string) {
+function withToken(baseUrl: string, path: string, token: string, hostId?:string) {
   const url = new URL(path, `${baseUrl}/`);
   if (token) url.searchParams.set("token", token);
+  if (hostId) url.searchParams.set('hostId',hostId);
   return url.toString();
 }
 
@@ -99,7 +100,7 @@ export async function fetchBackendHostInfo(
   let response: Response;
   try {
     response = await fetchHost(
-      withToken(config.baseUrl, "/api/host", config.token),
+      withToken(config.baseUrl, "/api/host", config.token, config.desktopHostId),
       {
         method: "GET",
         mode: "cors",

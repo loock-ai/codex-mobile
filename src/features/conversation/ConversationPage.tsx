@@ -133,6 +133,7 @@ export function ConversationPage({
   pendingAction,
   selectedServiceTier,
   selectedModelLabel,
+  modelSelectionAvailable = true,
   selectedEffort,
   selectedPermissionLabel,
   imageInputRef,
@@ -179,6 +180,7 @@ export function ConversationPage({
   pendingAction: string;
   selectedServiceTier: string | null;
   selectedModelLabel: string;
+  modelSelectionAvailable?: boolean;
   selectedEffort: string | null;
   selectedPermissionLabel: string;
   imageInputRef: RefObject<HTMLInputElement | null>;
@@ -207,7 +209,8 @@ export function ConversationPage({
   const turns = groupConversationTurns(active.turns ?? []);
   const isNewChat = !active.id;
   const hasDraft = Boolean(draft.trim() || draftImages.length || draftFiles.length);
-  const canSteer = busy && steerable && hasDraft;
+  const desktopBridge = client?.backend === "desktop-cdp" || client?.backend === "desktop-control";
+  const canSteer = busy && steerable && hasDraft && !desktopBridge;
   const realtime = useRealtimeConversation({
     client,
     threadId: String(active.id ?? ""),
@@ -230,7 +233,7 @@ export function ConversationPage({
   const interactive =
     loadState === "ready" &&
     accessMode === "interactive" &&
-    (!isNewChat || !!active.cwd);
+    (!isNewChat || !!active.cwd || desktopBridge);
   const requestOlderTurns = () => {
     if (!["idle", "error"].includes(olderTurnsState)) return;
     beginPrependPreservation();
@@ -295,7 +298,7 @@ export function ConversationPage({
       </header>
       <ConversationActionMenu
         open={actionsOpen}
-        readOnly={accessMode === "readOnly"}
+        readOnly={accessMode === "readOnly" || desktopBridge}
         thread={active}
         pendingAction={pendingAction}
         onClose={() => setActionsOpen(false)}
@@ -553,25 +556,25 @@ export function ConversationPage({
             {t("正在处理附件…")}
           </div>
         )}
-        <div className="chips">
+        {client?.backend === "desktop-cdp" ? <div className="chips"><span>{t("桌面当前模型与权限")}</span></div> : <div className="chips">
           <button
             type="button"
-            aria-label={t("选择模型、智能与速度")}
-            disabled={!interactive}
+            aria-label={t(client?.backend === "desktop-control" ? "选择模型与思考强度" : "选择模型、智能与速度")}
+            disabled={!interactive || !modelSelectionAvailable || busy}
             onClick={onOpenAgentSettings}
           >
             {selectedServiceTier ? "⚡ " : ""}
             {selectedModelLabel} {effortLabel(selectedEffort)}
           </button>
-          <button
+          {client?.backend === "desktop-control" ? <span>{t("沿用桌面权限")}</span> : <button
             type="button"
             aria-label={t("选择审批与权限模式")}
             disabled={!interactive}
             onClick={onOpenPermissionSettings}
           >
             {selectedPermissionLabel}
-          </button>
-        </div>
+          </button>}
+        </div>}
         <div className="composer">
           <input
             ref={imageInputRef}
@@ -593,6 +596,7 @@ export function ConversationPage({
             aria-label={t("添加附件")}
             disabled={
               !interactive ||
+              desktopBridge ||
               realtimeActive ||
               imageReading
             }

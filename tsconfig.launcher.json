@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": { "types": ["node", "react", "react-dom"] },
+  "include": ["launcher/**/*.tsx", "tests/launcher/**/*.tsx"]
+}

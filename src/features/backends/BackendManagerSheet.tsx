@@ -26,6 +26,7 @@ import { t, useI18n } from "../../i18n";
 import { GatewayQrScannerSheet } from "./GatewayQrScannerSheet";
 
 interface BackendDraft {
+  remoteProjects?: boolean;
   id: string;
   name: string;
   gatewayUrl: string;
@@ -153,6 +154,7 @@ export function BackendManagerSheet({
         token: gateway.token,
         enabled: draft.enabled,
         order: draft.order,
+        ...(draft.remoteProjects?{remoteProjects:true}:{}),
       };
       const host = await probe(candidate);
       const hostId = host.hostId.trim();
@@ -234,6 +236,10 @@ export function BackendManagerSheet({
                 </button>
               </div>
             </div>
+            <label style={{display:'flex',alignItems:'center',gap:10}}>
+              <input type="checkbox" style={{width:'auto'}} checked={draft.remoteProjects===true} onChange={event=>setDraft({...draft,remoteProjects:event.target.checked})}/>
+              <span>{t('远程项目')}</span>
+            </label>
             {error && <p className="backend-form-error" role="alert">{error}</p>}
             <div className="backend-form-actions">
               <button
@@ -318,6 +324,7 @@ export function BackendManagerSheet({
                             ),
                             enabled: backend.enabled,
                             order: backend.order,
+                            remoteProjects: backend.remoteProjects,
                           });
                           setError("");
                         }}

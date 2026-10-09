@@ -1,6 +1,7 @@
 import { t } from "../i18n";
 
 export interface RpcMessage {
+  sequence?: number;
   id?: number | string;
   method?: string;
   params?: unknown;
@@ -12,6 +13,7 @@ type NotificationListener = (message: RpcMessage) => void;
 type RequestListener = (message: RpcMessage) => void;
 
 interface PendingRequest {
+  write?: boolean;
   resolve: (value: unknown) => void;
   reject: (reason: unknown) => void;
   timeout: ReturnType<typeof setTimeout>;
@@ -19,6 +21,7 @@ interface PendingRequest {
 
 interface AppServerClientOptions {
   requestTimeoutMs?: number;
+  desktopHostId?: string;
 }
 
 export interface AppServerRequestOptions {
@@ -26,33 +29,39 @@ export interface AppServerRequestOptions {
 }
 
 export class AppServerClient {
+  backend: "app-server" | "desktop-cdp" | "desktop-control" = "app-server";
   private nextId = 1;
   private pending = new Map<number | string, PendingRequest>();
   private notificationListeners = new Set<NotificationListener>();
   private requestListeners = new Set<RequestListener>();
   private readonly requestTimeoutMs: number;
+  private readonly desktopHostId?: string;
 
   constructor(
     private readonly socket: WebSocket,
     options: AppServerClientOptions = {},
   ) {
     this.requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
+    this.desktopHostId = options.desktopHostId;
     socket.addEventListener("message", (event) => this.receive(String(event.data)));
     socket.addEventListener("close", () => {
       const error = new Error(t("与 app-server 的连接已断开"));
       for (const waiter of this.pending.values()) {
         clearTimeout(waiter.timeout);
-        waiter.reject(error);
+        waiter.reject(waiter.write ? Object.assign(new Error('桌面操作结果未确认，请先核对会话，避免重复发送'),{code:'ACTION_WRITE_UNKNOWN'}) : error);
       }
       this.pending.clear();
     });
   }
 
   async initialize() {
-    const result = await this.request("initialize", {
+    const result = await this.request<{ backend?: string; connected?: boolean }>("initialize", {
+      ...(this.desktopHostId?{hostId:this.desktopHostId}:{}),
       clientInfo: { name: "codex-mobile-web", title: "Codex Mobile Web", version: "0.2.0" },
       capabilities: { experimentalApi: true },
     });
+    this.backend = result?.backend === 'desktop-control' ? 'desktop-control' : result?.backend === "desktop-cdp" ? "desktop-cdp" : "app-server";
+    if(this.backend==='desktop-control'&&result.connected===false)throw new Error('桌面控制通道已断开，请重启控制服务');
     this.notify("initialized", {});
     return result;
   }
@@ -63,6 +72,7 @@ export class AppServerClient {
     options: AppServerRequestOptions = {},
   ): Promise<T> {
     const id = this.nextId++;
+    const write=this.backend==='desktop-control'&&['thread/start','thread/resume','turn/start','turn/interrupt','desktop/approval/respond'].includes(method);
     return new Promise<T>((resolve, reject) => {
       if (this.socket.readyState !== WebSocket.OPEN) {
         reject(new Error(t("与 app-server 的连接不可用")));
@@ -70,12 +80,13 @@ export class AppServerClient {
       }
       const timeout = setTimeout(() => {
         if (!this.pending.delete(id)) return;
-        reject(new Error(t("{method} 请求超时", { method })));
+        reject(write ? Object.assign(new Error('桌面操作结果未确认，请先核对会话，避免重复发送'),{code:'ACTION_WRITE_UNKNOWN'}) : new Error(t("{method} 请求超时", { method })));
         if (this.socket.readyState === WebSocket.OPEN) {
           this.socket.close(4000, "request timeout");
         }
       }, options.timeoutMs ?? this.requestTimeoutMs);
       const pending: PendingRequest = {
+        write,
         resolve: resolve as (value: unknown) => void,
         reject,
         timeout,
@@ -95,7 +106,8 @@ export class AppServerClient {
     this.send({ method, params });
   }
 
-  respond(id: number | string, result: unknown) {
+  async respond(id: number | string, result: unknown) {
+    if(this.backend==='desktop-control'){await this.request('desktop/approval/respond',{approvalId:id,result});return;}
     this.send({ id, result });
   }
 
@@ -129,7 +141,7 @@ export class AppServerClient {
       if (!waiter) return;
       this.pending.delete(message.id);
       clearTimeout(waiter.timeout);
-      if (message.error) waiter.reject(new Error(message.error.message));
+      if (message.error) waiter.reject(Object.assign(new Error(message.error.message),{code:(message.error.data as {code?:string})?.code??message.error.code}));
       else waiter.resolve(message.result);
       return;
     }

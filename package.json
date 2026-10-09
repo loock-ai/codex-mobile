@@ -46,9 +46,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --pretty false",
+    "launcher": "electron launcher/main.cjs",
+    "build:launcher": "npm run build:package && node scripts/build-launcher.mjs",
+    "package:launcher": "npm run build:launcher && electron-builder --mac --dir"
   },
   "dependencies": {
+    "playwright-core": "^1.63.0",
     "qrcode": "^1.5.4",
     "ws": "^8.18.3"
   },
@@ -56,13 +60,17 @@
     "@playwright/test": "^1.56.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^24.10.1",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.0.4",
     "ajv": "^8.17.1",
     "concurrently": "^10.0.4",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
     "jsdom": "^27.2.0",
     "qr-scanner": "^1.4.2",
     "react": "^19.2.0",

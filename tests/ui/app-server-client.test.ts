@@ -25,6 +25,15 @@ class FakeSocket extends EventTarget {
 }
 
 describe("AppServerClient", () => {
+  it("识别结构化桌面通道，审批等待网关确认并保留错误码", async () => {
+    const socket=new FakeSocket(),client=new AppServerClient(socket as unknown as WebSocket);
+    const ready=client.initialize();socket.receive({id:1,result:{backend:'desktop-control',connected:true}});await ready;
+    expect(client.backend).toBe('desktop-control');
+    const response=client.respond('approval-1',{decision:'decline'});
+    const request=JSON.parse(socket.sent.at(-1)!);expect(request.method).toBe('desktop/approval/respond');
+    socket.receive({id:request.id,error:{code:-32000,message:'未确认',data:{code:'ACTION_WRITE_UNKNOWN'}}});
+    await expect(response).rejects.toMatchObject({code:'ACTION_WRITE_UNKNOWN'});
+  });
   it("初始化后发送 initialized 并加载线程列表", async () => {
     const socket = new FakeSocket();
     const client = new AppServerClient(socket as unknown as WebSocket);

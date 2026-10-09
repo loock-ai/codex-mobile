@@ -16,6 +16,7 @@ export type ComposerPicker =
 
 export function ComposerSettings({
   picker,
+  allowSpeed = true,
   effortOptions,
   speedOptions,
   permissionModes,
@@ -33,6 +34,7 @@ export function ComposerSettings({
   onChoosePermissionMode,
 }: {
   picker: ComposerPicker;
+  allowSpeed?: boolean;
   effortOptions: Array<{ id: string; label: string; description?: string }>;
   speedOptions: Array<{ id: string | null; label: string; description: string }>;
   permissionModes: PermissionMode[];
@@ -95,10 +97,10 @@ export function ComposerSettings({
               <span><strong>{t("模型")}</strong><small>{selectedModelLabel}</small></span>
               <Chevron />
             </button>
-            <button className="popover-link" onClick={() => onPickerChange("speed")}>
+            {allowSpeed && <button className="popover-link" onClick={() => onPickerChange("speed")}>
               <span><strong>{t("速度")}</strong><small>{selectedSpeedLabel}</small></span>
               <Chevron />
-            </button>
+            </button>}
           </>
         )}
         {picker === "model" && (

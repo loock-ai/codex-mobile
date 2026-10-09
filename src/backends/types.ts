@@ -1,6 +1,10 @@
 export interface BackendConfig {
   id: string;
   hostId?: string;
+  remoteProjects?: boolean;
+  /** 运行时远程设备身份，不持久化到设备注册表。 */
+  desktopHostId?: string;
+  parentBackendId?: string;
   name: string;
   baseUrl: string;
   token: string;

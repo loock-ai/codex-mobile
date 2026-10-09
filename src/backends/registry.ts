@@ -147,6 +147,7 @@ function normalizedBackends(value: unknown) {
           : new URL(baseUrl).hostname,
       baseUrl,
       token: typeof source.token === "string" ? source.token : "",
+      ...(source.remoteProjects === true ? {remoteProjects:true} : {}),
       enabled: source.enabled !== false,
       order,
     });
@@ -247,7 +248,23 @@ export function loadBackendRegistry(
   const stored = storage.getItem(BACKEND_REGISTRY_STORAGE_KEY);
   if (!stored) return createInitialBackendRegistry(origin, fallbackToken);
   try {
-    return normalizedRegistry(JSON.parse(stored), origin);
+    const registry = normalizedRegistry(JSON.parse(stored), origin);
+    if (!fallbackToken) return registry;
+    let currentOrigin: string;
+    try {
+      currentOrigin = normalizeBackendBaseUrl(origin);
+    } catch {
+      return registry;
+    }
+    // 启动器链接携带的新口令只更新同源条目，不影响其他设备或用户的选择。
+    return {
+      ...registry,
+      backends: registry.backends.map((backend) =>
+        backend.baseUrl === currentOrigin
+          ? { ...backend, token: fallbackToken }
+          : backend,
+      ),
+    };
   } catch {
     return createInitialBackendRegistry(origin, fallbackToken);
   }
@@ -310,6 +327,7 @@ export function upsertBackend(
     name: value.name.trim() || new URL(baseUrl).hostname,
     baseUrl,
     token: value.token,
+    ...(value.remoteProjects === true ? {remoteProjects:true} : {}),
     enabled: value.enabled,
     order: value.order,
   };

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
+import { open } from "node:fs/promises";
 
 export interface RuntimeConfig {
   mode: "managed" | "external";
@@ -59,6 +60,26 @@ export function assertGatewaySecurity(
 export function resolveRuntimeConfig(
   environment: Record<string, string | undefined> = process.env,
 ): RuntimeConfig {
+  if (environment.CODEX_APP_SERVER_MODE === "desktop") {
+    const address = environment.CODEX_APP_SERVER_WS_URL?.trim();
+    if (!address) throw new Error("Desktop 模式必须配置 CODEX_APP_SERVER_WS_URL，共享 Desktop 的服务地址");
+    let endpoint: URL;
+    try {
+      endpoint = new URL(address);
+    } catch {
+      throw new Error("Desktop 模式需要有效的本机 WebSocket 地址");
+    }
+    if (!["ws:", "wss:"].includes(endpoint.protocol) ||
+        !["127.0.0.1", "localhost", "[::1]"].includes(endpoint.hostname) ||
+        endpoint.username || endpoint.password || endpoint.hash) {
+      throw new Error("Desktop 模式需要有效的本机 WebSocket 地址");
+    }
+    return {
+      mode: "external",
+      upstreamUrl: address,
+      upstreamPort: Number(endpoint.port || (endpoint.protocol === "wss:" ? 443 : 80)),
+    };
+  }
   const mode = environment.CODEX_APP_SERVER_MODE === "external" ? "external" : "managed";
   const upstreamPort = Number(environment.CODEX_APP_SERVER_PORT ?? "18765");
   return {
@@ -94,13 +115,22 @@ async function waitUntilReady(port: number, child: ChildProcess) {
   throw new Error("等待 codex app-server 就绪超时");
 }
 
-export async function startManagedAppServer(port: number) {
+export async function resolveManagedLaunch(executable: string, args: string[], electron = Boolean(process.versions.electron)) {
+  let nodeScript = false;
+  if (electron) {
+    try { const file = await open(executable, "r"); try { const bytes = Buffer.alloc(128); const { bytesRead } = await file.read(bytes, 0, bytes.length, 0); const line = bytes.subarray(0, bytesRead).toString().split("\n")[0]; nodeScript = line.startsWith("#!") && /\bnode(?:\s|$)/.test(line); } finally { await file.close(); } } catch { /* spawn 会报告无效程序路径。 */ }
+  }
+  return { executable: nodeScript ? process.execPath : executable, args: nodeScript ? [executable, ...args] : args, environment: nodeScript ? { ELECTRON_RUN_AS_NODE: "1" } : {} };
+}
+
+export async function startManagedAppServer(port: number, executable = "codex") {
   if (!(await portAvailable(port))) {
     throw new Error(`app-server 端口 ${port} 已被占用`);
   }
-  const child = spawn("codex", appServerCommand(port), {
+  const launch = await resolveManagedLaunch(executable, appServerCommand(port));
+  const child = spawn(launch.executable, launch.args, {
     stdio: ["ignore", "inherit", "inherit"],
-    env: appServerEnvironment(),
+    env: { ...appServerEnvironment(), ...launch.environment },
   });
   const spawnError = new Promise<never>((_, reject) =>
     child.once("error", (error) => reject(new Error(`无法启动 codex app-server：${error.message}`))),

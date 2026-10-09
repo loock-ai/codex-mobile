@@ -1,13 +1,24 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["server", "tests/server", "vite.config.ts", "playwright.config.ts"]
+  "include": [
+    "server",
+    "tests/server",
+    "vite.config.ts",
+    "playwright.config.ts"
+  ]
 }
