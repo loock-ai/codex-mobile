@@ -56,7 +56,7 @@ function printHelp() {
   codex-mobile desktop [--check]
   codex-mobile bridge
   codex-mobile control [--port <端口>]
-  codex-mobile launcher
+  codex-mobile launcher [--open-web]
   codex-mobile --version
   codex-mobile --help
 
@@ -126,13 +126,14 @@ if (
   }
 }
 
-if (command === "launcher" && commandArgs.length === 0) {
+if (command === "launcher" && (commandArgs.length === 0 || (commandArgs.length === 1 && commandArgs[0] === "--open-web"))) {
   const { spawn } = await import("node:child_process");
   const { createRequire } = await import("node:module");
   const require = createRequire(import.meta.url);
   try {
     const electron = require("electron");
-    const child = spawn(electron, [resolve(packageRoot, "launcher/main.cjs")], { stdio: "inherit" });
+    const env = {...process.env}; delete env.ELECTRON_RUN_AS_NODE;
+    const child = spawn(electron, [resolve(packageRoot, "launcher/main.cjs"), ...commandArgs], { stdio: "inherit", env });
     await new Promise((resolve, reject) => { child.once("exit", code => { process.exitCode = code || 0; resolve(); }); child.once("error", reject); });
   } catch (error) { process.stderr.write(`请使用打包后的启动器 .app，或在源码安装 Electron：${error.message}\n`); process.exitCode = 1; }
   process.exit(process.exitCode || 0);

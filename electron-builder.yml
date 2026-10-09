@@ -6,6 +6,7 @@ extraMetadata:
   main: launcher/main.cjs
 files:
   - launcher/main.cjs
+  - launcher/commands.cjs
   - launcher/preload.cjs
   - launcher-ui/**
   - npm-dist/**

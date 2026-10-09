@@ -1,8 +1,14 @@
 const {app,Tray,Menu,BrowserWindow,nativeImage,ipcMain,clipboard,shell,dialog}=require('electron');
 const path=require('node:path');
 let tray,panel,controller,quitting=false;
+const {createCommandHandler}=require('./commands.cjs');
+let resolveReady,rejectReady;
+const ready=new Promise((resolve,reject)=>{resolveReady=resolve;rejectReady=reject;});
+ready.catch(()=>{});
+const openWeb=()=>{const url=controller.status().accessUrl;if(!url)throw new Error('请先启动连接');return shell.openExternal(url);};
+const runCommand=createCommandHandler({ready,start:()=>controller.start(),openWeb,showPanel});
 if(!app.requestSingleInstanceLock()){app.quit();}else{
- app.on('second-instance',()=>showPanel());
+ app.on('second-instance',(_event,argv)=>{void runCommand(argv).catch(showError);});
  app.whenReady().then(async()=>{
   app.dock?.hide();
   const root=path.resolve(__dirname,'..');
@@ -28,14 +34,13 @@ if(!app.requestSingleInstanceLock()){app.quit();}else{
   });
   handle('open-desktop',()=>controller.openDesktop());
   handle('copy-url',()=>{const url=controller.status().accessUrl;if(!url)throw new Error('请先启动连接');clipboard.writeText(url);});
-  const openWeb=()=>{const url=controller.status().accessUrl;if(!url)throw new Error('请先启动连接');return shell.openExternal(url);};
   handle('open-mobile',openWeb);
   handle('desktop-status',()=>controller.desktopStatus());handle('approve',(id,choice)=>controller.approve(id,choice));
   controller.on('status',status=>{if(!panel.isDestroyed())panel.webContents.send('launcher:changed',status);tray.setTitle(status.approvals?'⌘ '+status.approvals:'⌘');tray.setToolTip('Codex Mobile · '+status.phase);});
   tray.on('click',()=>panel.isVisible()?panel.hide():showPanel());
   tray.on('right-click',()=>tray.popUpContextMenu(Menu.buildFromTemplate([{label:'打开启动器',click:showPanel},{label:controller.status().running?'打开 Web':'启动并打开 Web',click:()=>controller.start().then(openWeb).catch(showError)},{label:'打开 ChatGPT',click:()=>controller.openDesktop().catch(showError)},{type:'separator'},{label:'退出启动器',click:()=>app.quit()}])));
-  await panel.loadFile(ui);showPanel();
- }).catch(showError);
+  await panel.loadFile(ui);resolveReady();await runCommand(process.argv);
+ }).catch(error=>{rejectReady(error);showError(error);});
  app.on('window-all-closed',()=>{});
  app.on('before-quit',event=>{if(quitting)return;event.preventDefault();quitting=true;Promise.resolve(controller?.stop()).finally(()=>app.quit());});
 }
